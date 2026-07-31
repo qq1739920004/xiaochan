@@ -6,6 +6,8 @@ import cn.hutool.http.HttpUtil;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import io.github.xiaocan.config.BusinessException;
+import io.github.xiaocan.model.BrandCardClaimAttemptResult;
+import io.github.xiaocan.model.BrandCardClaimStopReason;
 import io.github.xiaocan.model.StoreInfo;
 import io.github.xiaocan.model.enums.StoreTypeEnum;
 import io.github.xiaocan.model.vo.AddressVO;
@@ -24,6 +26,8 @@ public class XiaochanHttp {
     private static final String BASE_URL = "https://gw.xiaocantech.com/rpc";
     private static final String SERVER_NAME = "SilkwormRec";
     private static final String METHOD_NAME = "RecService.GetStorePromotionList";
+    private static final String BRAND_CARD_SERVER_NAME = "SilkwormVip";
+    private static final String BRAND_CARD_METHOD_NAME = "VipRightsService.GrabExtraBrandCard";
 
 
     private static final int PAGE_SIZE = 30;
@@ -36,6 +40,79 @@ public class XiaochanHttp {
     private static String getAshe(Long timeMillis, String serverName, String methodName, String nami) {
         String x = MD5.create().digestHex((serverName + "." + methodName).toLowerCase());
         return MD5.create().digestHex(x + timeMillis + nami);
+    }
+
+    public static BrandCardRequestParts buildBrandCardClaimRequestParts(Long silkId, String xSivir) {
+        long timeMillis = System.currentTimeMillis();
+        String nami = getNami();
+        String ashe = getAshe(timeMillis, BRAND_CARD_SERVER_NAME, BRAND_CARD_METHOD_NAME, nami);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("type", 99);
+        body.put("silk_id", silkId);
+
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("servername", BRAND_CARD_SERVER_NAME);
+        headers.put("methodname", BRAND_CARD_METHOD_NAME);
+        headers.put("X-Garen", String.valueOf(timeMillis));
+        headers.put("X-Nami", nami);
+        headers.put("X-Ashe", ashe);
+        headers.put("X-Sivir", xSivir);
+        headers.put("x-Teemo", String.valueOf(silkId));
+        headers.put("X-Platform", "iOS");
+        headers.put("User-Agent", "XC;iOS;3.19.0");
+        headers.put("X-Session-Id", UUID.randomUUID().toString());
+        headers.put("x-Annie", "XC");
+        headers.put("Accept", "*/*");
+        headers.put("Content-Type", "application/json");
+        return new BrandCardRequestParts(JSONObject.toJSONString(body), headers);
+    }
+
+    public static BrandCardClaimAttemptResult grabExtraBrandCard(Long silkId, String xSivir) {
+        BrandCardRequestParts request = buildBrandCardClaimRequestParts(silkId, xSivir);
+        HttpResponse response = null;
+        try {
+            response = HttpUtil.createPost(BASE_URL)
+                    .headerMap(request.headers(), true)
+                    .timeout(1200)
+                    .body(request.body())
+                    .execute();
+            if (!response.isOk()) {
+                return BrandCardClaimAttemptResult.retryable(null, "HTTP 状态码: " + response.getStatus());
+            }
+            JSONObject result = JSONObject.parseObject(response.body());
+            Integer verifyMethod = result.getInteger("verify_method");
+            JSONObject status = result.getJSONObject("status");
+            Integer code = status == null ? null : status.getInteger("code");
+            String message = status == null ? "响应缺少 status" : status.getString("msg");
+            if (verifyMethod != null && verifyMethod != 0) {
+                return BrandCardClaimAttemptResult.stop(code, message, BrandCardClaimStopReason.NEED_VERIFY);
+            }
+            if (Objects.equals(code, 0)) {
+                return BrandCardClaimAttemptResult.stop(code, message, BrandCardClaimStopReason.SUCCESS);
+            }
+            String content = (message == null ? "" : message).toLowerCase();
+            if (content.contains("已抢完") || content.contains("无券")) {
+                return BrandCardClaimAttemptResult.stop(code, message, BrandCardClaimStopReason.SOLD_OUT);
+            }
+            if (content.contains("已领取") || content.contains("已领")) {
+                return BrandCardClaimAttemptResult.stop(code, message, BrandCardClaimStopReason.ALREADY_CLAIMED);
+            }
+            if (content.contains("登录") || content.contains("token") || content.contains("鉴权")
+                    || content.contains("失效") || content.contains("过期")) {
+                return BrandCardClaimAttemptResult.stop(code, message, BrandCardClaimStopReason.AUTH_INVALID);
+            }
+            return BrandCardClaimAttemptResult.stop(code, message, BrandCardClaimStopReason.BUSINESS_FAILED);
+        } catch (Exception e) {
+            log.warn("{} request failed", BRAND_CARD_METHOD_NAME, e);
+            return BrandCardClaimAttemptResult.retryable(null, "请求异常: " + e.getMessage());
+        } finally {
+            if (response != null) {
+                response.close();
+            }
+        }
+    }
+
+    public record BrandCardRequestParts(String body, Map<String, String> headers) {
     }
 
 
