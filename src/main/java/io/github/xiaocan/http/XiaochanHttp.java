@@ -8,6 +8,9 @@ import com.alibaba.fastjson2.JSONObject;
 import io.github.xiaocan.config.BusinessException;
 import io.github.xiaocan.model.BrandCardClaimAttemptResult;
 import io.github.xiaocan.model.BrandCardClaimStopReason;
+import io.github.xiaocan.model.StoreAutoClaimAttempt;
+import io.github.xiaocan.model.StoreAutoClaimRequest;
+import io.github.xiaocan.model.StoreAutoClaimStopReason;
 import io.github.xiaocan.model.StoreInfo;
 import io.github.xiaocan.model.enums.StoreTypeEnum;
 import io.github.xiaocan.model.vo.AddressVO;
@@ -28,6 +31,8 @@ public class XiaochanHttp {
     private static final String METHOD_NAME = "RecService.GetStorePromotionList";
     private static final String BRAND_CARD_SERVER_NAME = "SilkwormVip";
     private static final String BRAND_CARD_METHOD_NAME = "VipRightsService.GrabExtraBrandCard";
+    private static final String STORE_CLAIM_SERVER_NAME = "Silkworm";
+    private static final String STORE_CLAIM_METHOD_NAME = "SilkwormService.GrabPromotionQuota";
 
 
     private static final int PAGE_SIZE = 30;
@@ -113,6 +118,96 @@ public class XiaochanHttp {
     }
 
     public record BrandCardRequestParts(String body, Map<String, String> headers) {
+    }
+
+    public static StoreAutoClaimRequestParts buildStoreAutoClaimRequest(StoreAutoClaimRequest request) {
+        long timeMillis = System.currentTimeMillis();
+        String nami = getNami();
+        String ashe = getAshe(timeMillis, STORE_CLAIM_SERVER_NAME, STORE_CLAIM_METHOD_NAME, nami);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("city_code", request.cityCode());
+        body.put("if_advance_order", false);
+        body.put("if_pre_order", false);
+        body.put("latitude", new BigDecimal(request.latitude()));
+        body.put("longitude", new BigDecimal(request.longitude()));
+        body.put("promotion_id", request.promotionId());
+        body.put("silk_id", request.silkId());
+        body.put("store_platform", request.storePlatform());
+        if (request.redpackId() != null) {
+            body.put("redpack_id", request.redpackId());
+        }
+
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("servername", STORE_CLAIM_SERVER_NAME);
+        headers.put("methodname", STORE_CLAIM_METHOD_NAME);
+        headers.put("X-Garen", String.valueOf(timeMillis));
+        headers.put("X-Nami", nami);
+        headers.put("X-Ashe", ashe);
+        headers.put("X-Sivir", request.xSivir());
+        headers.put("x-Teemo", String.valueOf(request.silkId()));
+        headers.put("X-Platform", "h5");
+        headers.put("X-Version", "3.19.0");
+        headers.put("X-Session-Id", UUID.randomUUID().toString());
+        headers.put("x-Annie", "XC");
+        headers.put("x-City", String.valueOf(request.cityCode()));
+        headers.put("x-CityCode", String.valueOf(request.cityCode()));
+        headers.put("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) "
+                + "AppleWebKit/605.1.15 (KHTML, like Gecko) xcapp;3.19.0;iOS");
+        headers.put("Accept", "application/json, text/plain, */*");
+        headers.put("Content-Type", "application/json");
+        return new StoreAutoClaimRequestParts(JSONObject.toJSONString(body), headers);
+    }
+
+    public static StoreAutoClaimAttempt grabPromotionQuota(StoreAutoClaimRequest request) {
+        StoreAutoClaimRequestParts requestParts = buildStoreAutoClaimRequest(request);
+        HttpResponse response = null;
+        try {
+            response = HttpUtil.createPost(BASE_URL)
+                    .headerMap(requestParts.headers(), true)
+                    .timeout(1500)
+                    .body(requestParts.body())
+                    .execute();
+            if (!response.isOk()) {
+                return StoreAutoClaimAttempt.retryable("HTTP 状态码: " + response.getStatus());
+            }
+            JSONObject result = JSONObject.parseObject(response.body());
+            JSONObject status = result.getJSONObject("status");
+            Integer code = status == null ? null : status.getInteger("code");
+            String message = status == null ? "响应缺少 status" : status.getString("msg");
+            Long promotionOrderId = result.getLong("promotion_order_id");
+            if (Objects.equals(code, 0)) {
+                return StoreAutoClaimAttempt.success(code, message, promotionOrderId);
+            }
+            return StoreAutoClaimAttempt.stop(code, message, classifyStoreClaimFailure(message));
+        } catch (Exception e) {
+            log.warn("{} request failed", STORE_CLAIM_METHOD_NAME, e);
+            return StoreAutoClaimAttempt.retryable("请求异常: " + e.getMessage());
+        } finally {
+            if (response != null) {
+                response.close();
+            }
+        }
+    }
+
+    private static StoreAutoClaimStopReason classifyStoreClaimFailure(String message) {
+        String content = message == null ? "" : message.toLowerCase();
+        if (content.contains("已抢完") || content.contains("无券") || content.contains("过期")) {
+            return StoreAutoClaimStopReason.SOLD_OUT_OR_EXPIRED;
+        }
+        if (content.contains("已领取") || content.contains("已领")) {
+            return StoreAutoClaimStopReason.ALREADY_CLAIMED;
+        }
+        if (content.contains("验证") || content.contains("滑块") || content.contains("风控")) {
+            return StoreAutoClaimStopReason.NEED_VERIFY;
+        }
+        if (content.contains("登录") || content.contains("token") || content.contains("鉴权")
+                || content.contains("失效")) {
+            return StoreAutoClaimStopReason.AUTH_INVALID;
+        }
+        return StoreAutoClaimStopReason.BUSINESS_FAILURE;
+    }
+
+    public record StoreAutoClaimRequestParts(String body, Map<String, String> headers) {
     }
 
 
