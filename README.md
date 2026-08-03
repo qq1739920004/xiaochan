@@ -24,6 +24,18 @@ body: {"type":99,"silk_id":你的 silk_id}
 
 `X-Sivir` 来自你自己的小蚕抓包请求头；它和本项目网页登录用的 `Token` 不是同一个东西。保存后页面只显示掩码，真实值不会通过读取接口回显。登录态失效后，需要重新抓包并覆盖保存。
 
+## 指定门店自动抢单
+
+自动抢单只对“指定门店”监控生效，默认关闭。配置步骤：
+
+1. 先在“自动领取大牌卷”页面保存当前账号的 `silk_id` 和 `X-Sivir`。
+2. 在首页或“监控管理”新增/编辑指定门店监控，打开“启用自动抢单”。
+3. 设置最大请求次数和 `100-400ms` 范围内的随机间隔，然后保存并启用监控。
+4. 系统每 2 秒检查一次门店活动；活动未到开始时间时只观察，到可抢时间后才发抢单请求。
+5. 同一门店活动每天只进入一次抢单流程。图文评价返利严格高于无需评价时选图文评价，否则选无需评价；抢单记录可在监控卡片的“抢单记录”中查看。
+
+自动抢单使用抓包确认的 `SilkwormService.GrabPromotionQuota` 接口，并按活动实际时间、库存、评价条件和平台参数发起请求。网络异常会按配置重试；成功、售罄、已领取、登录态失效、需要验证或明确业务失败会停止。不实现验证码、滑块或风控绕过，也不保证一定抢到。
+
 ## Docker 部署
 
 ### 首次部署
@@ -92,6 +104,7 @@ echo "$PROJECT_TOKEN"
 ```bash
 git pull
 docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" xiaocan' < deploy/migrations/20260731_brand_card.sql
+docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" xiaocan' < deploy/migrations/20260803_store_auto_claim.sql
 docker compose --profile tunnel up -d --build
 ```
 

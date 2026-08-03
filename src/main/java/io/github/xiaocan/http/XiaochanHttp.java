@@ -171,6 +171,10 @@ public class XiaochanHttp {
                 return StoreAutoClaimAttempt.retryable("HTTP 状态码: " + response.getStatus());
             }
             JSONObject result = JSONObject.parseObject(response.body());
+            Integer verifyMethod = result.getInteger("verify_method");
+            if (verifyMethod != null && verifyMethod != 0) {
+                return StoreAutoClaimAttempt.stop(null, "需要验证", StoreAutoClaimStopReason.NEED_VERIFY);
+            }
             JSONObject status = result.getJSONObject("status");
             Integer code = status == null ? null : status.getInteger("code");
             String message = status == null ? "响应缺少 status" : status.getString("msg");
@@ -208,6 +212,35 @@ public class XiaochanHttp {
     }
 
     public record StoreAutoClaimRequestParts(String body, Map<String, String> headers) {
+    }
+
+    public static Long getAvailableRedpackId(StoreAutoClaimRequest request) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("bwc_type", 0);
+        body.put("store_category_sub_type", 2);
+        body.put("city_code", request.cityCode());
+        body.put("silk_id", request.silkId());
+        body.put("is_super_brand", false);
+        body.put("store_type", 2);
+        body.put("promotion_event_type", 0);
+        body.put("bwc_platform", request.storePlatform());
+        body.put("store_platform_order_money", toCents(request.storePlatformOrderMoney()));
+        body.put("promotion_id", request.promotionId());
+        body.put("store_id", request.storeId());
+        body.put("promotion_silk_amount", toCents(request.promotionSilkAmount()));
+        body.put("promotion_type", 0);
+        String resultBody = postWithRes(BASE_URL, JSONObject.toJSONString(body), request.cityCode(),
+                "RedPackService", "RedPackService.GetOrderUserRedPackList", request.silkId(), request.xSivir());
+        JSONObject result = JSONObject.parseObject(resultBody);
+        JSONArray availableItems = result.getJSONArray("available_items");
+        if (availableItems == null || availableItems.isEmpty()) {
+            return null;
+        }
+        return availableItems.getJSONObject(0).getLong("user_red_pack_id");
+    }
+
+    private static Long toCents(BigDecimal value) {
+        return value == null ? 0L : value.movePointRight(2).longValue();
     }
 
 
@@ -340,6 +373,33 @@ public class XiaochanHttp {
                 .execute();
         if (!response.isOk()) {
             log.error("状态码错误: {}, body: {}", response.getStatus(), response.body());
+            throw new BusinessException("状态码错误:" + response.getStatus());
+        }
+        String resBody = response.body();
+        response.close();
+        return resBody;
+    }
+
+    private static String postWithRes(String url, String body, Integer cityCode, String serverName,
+                                      String methodName, Long silkId, String xSivir) {
+        Long timeMillis = System.currentTimeMillis();
+        String nami = getNami();
+        String ashe = getAshe(timeMillis, serverName, methodName, nami);
+        Map<String, String> headers = getHeaders(timeMillis, ashe, cityCode, serverName, methodName, nami);
+        headers.put("X-Sivir", xSivir);
+        headers.put("x-Teemo", String.valueOf(silkId));
+        headers.put("X-Session-Id", UUID.randomUUID().toString());
+        headers.put("X-Platform", "h5");
+        headers.put("X-Version", "3.19.0");
+        headers.put("x-CityCode", String.valueOf(cityCode));
+        headers.put("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) "
+                + "AppleWebKit/605.1.15 (KHTML, like Gecko) xcapp;3.19.0;iOS");
+        HttpResponse response = HttpUtil.createPost(url)
+                .headerMap(headers, true)
+                .timeout(1500)
+                .body(body)
+                .execute();
+        if (!response.isOk()) {
             throw new BusinessException("状态码错误:" + response.getStatus());
         }
         String resBody = response.body();

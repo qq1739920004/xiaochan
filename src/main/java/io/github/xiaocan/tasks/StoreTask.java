@@ -159,9 +159,15 @@ public class StoreTask extends BaseTask {
         if (!availableStores.isEmpty() && notifyConfig.getType() == MonitorTypeEnums.STORE_ACTIVITY) {
             StoreExtNotifyConfig storeExtNotifyConfig = JSON.parseObject(notifyConfig.getExtConfig(), StoreExtNotifyConfig.class);
             NotifyFrequencyEnums remindFrequency = storeExtNotifyConfig.getRemindFrequency();
-            if (remindFrequency == null || remindFrequency == NotifyFrequencyEnums.ONCE) {
+            if ((remindFrequency == null || remindFrequency == NotifyFrequencyEnums.ONCE)
+                    && !isAutoClaimEnabled(storeExtNotifyConfig)) {
                 monitoryConfigService.toggleStatus(notifyConfig.getId(), MonitorConfigStatusEnums.DISABLE);
             }
         }
+    }
+
+    private boolean isAutoClaimEnabled(StoreExtNotifyConfig config) {
+        return config != null && config.getAutoClaimConfig() != null
+                && Boolean.TRUE.equals(config.getAutoClaimConfig().getEnabled());
     }
 }

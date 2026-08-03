@@ -37,6 +37,10 @@ const historyPagination = reactive({
   pageSize: 10,
   total: 0,
 })
+const autoClaimHistoryDialogVisible = ref(false)
+const autoClaimHistoryLoading = ref(false)
+const autoClaimHistoryList = ref<any[]>([])
+const autoClaimHistoryName = ref('')
 
 // 对话框相关
 const dialogVisible = ref(false)
@@ -64,6 +68,12 @@ const form = reactive({
   weeks: [] as string[],
   cron: '',
   remindFrequency: 'ONCE',
+  autoClaimConfig: {
+    enabled: false,
+    maxAttempts: 5,
+    minIntervalMs: 150,
+    maxIntervalMs: 350,
+  },
   minimumPayExtNotifyConfig: {
     minimumPay: 1,
   },
@@ -264,6 +274,12 @@ function resetForm() {
   form.weeks = []
   form.cron = ''
   form.remindFrequency = 'ONCE'
+  form.autoClaimConfig = {
+    enabled: false,
+    maxAttempts: 5,
+    minIntervalMs: 150,
+    maxIntervalMs: 350,
+  }
   form.minimumPayExtNotifyConfig = { minimumPay: 1 }
   form.storeKeywordExtNotifyConfig = { keyword: '', limitDistance: true }
   cronCollapseActive.value = []
@@ -290,6 +306,12 @@ function showEditDialog(config: any) {
   form.weeks = config.weeks ? config.weeks.split(',') : []
   form.cron = config.cron || ''
   form.remindFrequency = config.storeExtNotifyConfig?.remindFrequency || 'ONCE'
+  form.autoClaimConfig = {
+    enabled: Boolean(config.storeExtNotifyConfig?.autoClaimConfig?.enabled),
+    maxAttempts: config.storeExtNotifyConfig?.autoClaimConfig?.maxAttempts ?? 5,
+    minIntervalMs: config.storeExtNotifyConfig?.autoClaimConfig?.minIntervalMs ?? 150,
+    maxIntervalMs: config.storeExtNotifyConfig?.autoClaimConfig?.maxIntervalMs ?? 350,
+  }
   cronCollapseActive.value = form.cron ? ['cron'] : []
   if (config.type === 'MINIMUM_PAY' && config.minimumPayExtNotifyConfig) {
     form.minimumPayExtNotifyConfig.minimumPay = config.minimumPayExtNotifyConfig.minimumPay
@@ -325,6 +347,7 @@ function submitForm() {
             requestData.storeExtNotifyConfig = {
               ...currentEditConfig.value.storeExtNotifyConfig,
               remindFrequency: form.remindFrequency,
+              autoClaimConfig: { ...form.autoClaimConfig },
             }
           }
           if (currentEditConfig.value.type === 'STORE_KEYWORD') {
@@ -431,6 +454,42 @@ async function loadExecHistory() {
   } finally {
     historyLoading.value = false
   }
+}
+
+async function showAutoClaimHistory(config: any) {
+  autoClaimHistoryName.value = getLocationName(config.locationId)
+  autoClaimHistoryDialogVisible.value = true
+  autoClaimHistoryLoading.value = true
+  try {
+    const response = await api.post('/api/store-auto-claim/history/page', {
+      monitorConfigId: config.id,
+      pageNum: 1,
+      pageSize: 20,
+    })
+    if (response.data.success) {
+      autoClaimHistoryList.value = response.data.data?.records || []
+    } else {
+      ElMessage.error(response.data.msg || '获取自动抢单记录失败')
+    }
+  } catch {
+    ElMessage.error('获取自动抢单记录失败，请检查网络连接')
+  } finally {
+    autoClaimHistoryLoading.value = false
+  }
+}
+
+function getAutoClaimStopText(reason: string) {
+  const labels: Record<string, string> = {
+    SUCCESS: '抢单成功',
+    SOLD_OUT_OR_EXPIRED: '已抢完或已过期',
+    ALREADY_CLAIMED: '已经领取',
+    AUTH_INVALID: '登录态失效',
+    NEED_VERIFY: '需要验证',
+    MISSING_CREDENTIALS: '未配置凭证',
+    BUSINESS_FAILURE: '业务失败',
+    MAX_ATTEMPTS_REACHED: '达到次数上限',
+  }
+  return labels[reason] || reason || '未知'
 }
 
 function handleHistoryPageChange(page: number) {
@@ -600,6 +659,9 @@ onUnmounted(() => {
                 <p class="info-item">
                   <span>提醒频率：{{ getFrequencyText(config.storeExtNotifyConfig.remindFrequency) }}</span>
                 </p>
+                <p class="info-item">
+                  <span>自动抢单：{{ config.storeExtNotifyConfig.autoClaimConfig?.enabled ? '已启用' : '未启用' }}</span>
+                </p>
               </template>
             </div>
 
@@ -619,6 +681,15 @@ onUnmounted(() => {
                 :disabled="loading"
               >
                 运行记录
+              </el-button>
+              <el-button
+                v-if="config.type === 'STORE_ACTIVITY' && config.storeExtNotifyConfig?.autoClaimConfig?.enabled"
+                size="small"
+                class="history-btn"
+                @click="showAutoClaimHistory(config)"
+                :disabled="loading"
+              >
+                抢单记录
               </el-button>
               <el-button
                 v-if="config.type === 'STORE_ACTIVITY' && config.storeExtNotifyConfig?.storeInfo"
@@ -866,6 +937,30 @@ onUnmounted(() => {
           </el-radio-group>
         </el-form-item>
 
+        <template v-if="isEdit && currentEditConfig?.type === 'STORE_ACTIVITY'">
+          <el-form-item label="启用自动抢单">
+            <el-switch v-model="form.autoClaimConfig.enabled" />
+            <span class="form-tip">活动到可抢时间后自动选择返利更优的活动</span>
+          </el-form-item>
+          <el-row v-if="form.autoClaimConfig.enabled" :gutter="16">
+            <el-col :span="8">
+              <el-form-item label="最大次数">
+                <el-input-number v-model="form.autoClaimConfig.maxAttempts" :min="1" :max="30" controls-position="right" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="最小间隔(ms)">
+                <el-input-number v-model="form.autoClaimConfig.minIntervalMs" :min="100" :max="400" controls-position="right" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="8">
+              <el-form-item label="最大间隔(ms)">
+                <el-input-number v-model="form.autoClaimConfig.maxIntervalMs" :min="100" :max="400" controls-position="right" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </template>
+
         <!-- 最小实付金额：新增且类型为 MINIMUM_PAY 时显示，编辑时仅 MINIMUM_PAY 类型显示 -->
         <template
           v-if="!isEdit ? configType === 'MINIMUM_PAY' : currentEditConfig?.type === 'MINIMUM_PAY'"
@@ -996,6 +1091,37 @@ onUnmounted(() => {
           />
         </div>
       </div>
+    </el-dialog>
+
+    <el-dialog
+      :title="`自动抢单记录 - ${autoClaimHistoryName}`"
+      v-model="autoClaimHistoryDialogVisible"
+      :width="isMobile ? 'calc(100% - 24px)' : '980px'"
+      class="history-dialog"
+    >
+      <el-table
+        v-loading="autoClaimHistoryLoading"
+        :data="autoClaimHistoryList"
+        empty-text="暂无自动抢单记录"
+      >
+        <el-table-column prop="startTime" label="开始时间" min-width="165">
+          <template #default="{ row }">{{ formatDateTime(row.startTime) }}</template>
+        </el-table-column>
+        <el-table-column prop="storeName" label="门店" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="rebateCondition" label="评价" width="90">
+          <template #default="{ row }">{{ row.rebateCondition === 2 ? '图文评价' : '无需评价' }}</template>
+        </el-table-column>
+        <el-table-column prop="rebatePrice" label="返利" width="90" />
+        <el-table-column prop="requestCount" label="请求次数" width="90" align="center" />
+        <el-table-column label="结果" min-width="130">
+          <template #default="{ row }">
+            <el-tag :type="row.success ? 'success' : 'warning'" size="small">
+              {{ row.success ? '抢单成功' : getAutoClaimStopText(row.stopReason) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="resultMsg" label="响应消息" min-width="180" show-overflow-tooltip />
+      </el-table>
     </el-dialog>
   </div>
 </template>

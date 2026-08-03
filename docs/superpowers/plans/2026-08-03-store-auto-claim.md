@@ -18,7 +18,7 @@
 - Create: `src/main/java/io/github/xiaocan/service/StoreAutoClaimCandidateSelector.java`
 - Test: `src/test/java/io/github/xiaocan/service/StoreAutoClaimCandidateSelectorTest.java`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```java
 @Test
@@ -32,13 +32,13 @@ void choosesNoReviewWhenRebatesAreEqual() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `mvn -q -Dtest=StoreAutoClaimCandidateSelectorTest test`
 
 Expected: compilation failure because the selector does not exist.
 
-- [ ] **Step 3: Implement minimal production code**
+- [x] **Step 3: Implement minimal production code**
 
 ```java
 @Data
@@ -60,11 +60,11 @@ public Optional<StoreInfo> select(List<StoreInfo> stores) {
 
 Add `private StoreAutoClaimConfig autoClaimConfig = new StoreAutoClaimConfig();` to `StoreExtNotifyConfig`.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `mvn -q -DskipTests=false test`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main src/test
@@ -83,7 +83,7 @@ git commit -m "feat: add auto claim candidate selection"
 - Test: `src/test/java/io/github/xiaocan/http/XiaochanHttpStoreAutoClaimTest.java`
 - Test: `src/test/java/io/github/xiaocan/service/StoreAutoClaimExecutorTest.java`
 
-- [ ] **Step 1: Write failing contract and retry tests**
+- [x] **Step 1: Write failing contract and retry tests**
 
 ```java
 @Test
@@ -101,13 +101,13 @@ void retriesOnlyTransportFailuresUntilSuccess() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `mvn -q -Dtest=XiaochanHttpStoreAutoClaimTest,StoreAutoClaimExecutorTest test`
 
 Expected: compilation failure because the store-claim API is absent.
 
-- [ ] **Step 3: Implement the exact HAR contract**
+- [x] **Step 3: Implement the exact HAR contract**
 
 Build `SilkwormService.GrabPromotionQuota` with `city_code`, `if_advance_order`, `if_pre_order`, `latitude`, `longitude`, `promotion_id`, `silk_id`, and `store_platform`; add `redpack_id` only when non-null. Generate new `X-Garen`, `X-Nami`, `X-Ashe`, and `X-Session-Id` per request, and carry `X-Sivir` and `x-Teemo`.
 
@@ -119,11 +119,11 @@ return StoreAutoClaimAttempt.stop(code, message, BUSINESS_FAILURE);
 
 Non-zero business responses, verification, authentication failure, sold-out and expired states stop without retry. Only transport exceptions retry with a random 150-350ms delay, capped by configuration.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `mvn -q -DskipTests=false test`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main src/test
@@ -144,7 +144,7 @@ git commit -m "feat: add store auto claim http executor"
 - Create: `deploy/migrations/20260803_store_auto_claim.sql`
 - Test: `src/test/java/io/github/xiaocan/service/StoreAutoClaimServiceTest.java`
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 ```java
 @Test
@@ -160,21 +160,21 @@ void recordsMissingCredentialsWithoutSendingAClaim() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `mvn -q -Dtest=StoreAutoClaimServiceTest test`
 
-- [ ] **Step 3: Implement preflight and history**
+- [x] **Step 3: Implement preflight and history**
 
 Before claim, load the current user's existing `BrandCardClaimConfigEntity`; require its `silkId` and `X-Sivir`. Query `RedPackService.GetOrderUserRedPackList`; pass the first `available_items[].user_red_pack_id` only when present. Persist user/config/activity/order identifiers, selected condition and rebate, schedule and execution timestamps, attempts, code/message, success and stop reason. Add `POST /api/store-auto-claim/history/page` and restrict it to the current user's rows.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `mvn -q -DskipTests=false test`
 
 Run: `docker compose config -q`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main ddl.sql deploy/migrations src/test
@@ -188,7 +188,7 @@ git commit -m "feat: persist store auto claim history"
 - Modify: `src/main/java/io/github/xiaocan/tasks/StoreTask.java`
 - Test: `src/test/java/io/github/xiaocan/tasks/StoreAutoClaimTaskTest.java`
 
-- [ ] **Step 1: Write failing scheduling tests**
+- [x] **Step 1: Write failing scheduling tests**
 
 ```java
 @Test
@@ -205,19 +205,19 @@ void claimsCurrentCandidateOnlyOnce() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `mvn -q -Dtest=StoreAutoClaimTaskTest test`
 
-- [ ] **Step 3: Implement scheduling**
+- [x] **Step 3: Implement scheduling**
 
 Poll only enabled specified-store auto-claim configurations every 10 seconds, respecting their existing time/day/status restrictions. Find candidates using the same name and `uniqId` rules as `StoreTask`. For a future activity register one runnable keyed by `configId:promotionId`; for an active activity run through the task scheduler. Remove the key in `finally`, preventing duplicate queued/running claims. Call the same inspection after the normal `StoreTask` finds activities, without changing its notification behavior.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `mvn -q -DskipTests=false test`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/main src/test
@@ -232,21 +232,21 @@ git commit -m "feat: trigger automatic claims from store monitoring"
 - Modify: `README.md`
 - Modify: `ddl.sql`
 
-- [ ] **Step 1: Verify available frontend test tooling**
+- [x] **Step 1: Verify available frontend test tooling**
 
 Run: `npm run`
 
 Expected: inspect whether a component-test script exists; if absent, use the production build as the automated frontend verification.
 
-- [ ] **Step 2: Implement configuration and history UI**
+- [x] **Step 2: Implement configuration and history UI**
 
 Add an “自动抢单” switch to the specified-store monitor dialog. Persist `autoClaimConfig` while retaining existing `storeInfo` and `remindFrequency`. Display the enabled state in monitor management and add a “抢单记录” command opening a paginated dialog backed by the history API. Rows show selected activity, evaluation type, rebate, attempts, result message, order number and execution time. Never render full `X-Sivir`.
 
-- [ ] **Step 3: Document operations**
+- [x] **Step 3: Document operations**
 
 Document: configure `silk_id` and `X-Sivir` in the existing 大牌券 page; create a specified-store monitor; enable auto claim; inspect histories; run the SQL migration before rebuilding an existing Docker deployment. State that verification/risk responses stop the task and success is not guaranteed.
 
-- [ ] **Step 4: Verify build and deployment files**
+- [x] **Step 4: Verify build and deployment files**
 
 Run: `npm ci --include=dev --registry=https://registry.npmjs.org && npm run build`
 
@@ -262,4 +262,3 @@ Run: `docker compose config -q`
 git add frontend README.md ddl.sql deploy/migrations
 git commit -m "feat: add automatic store claim operations"
 ```
-

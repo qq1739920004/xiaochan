@@ -1,5 +1,7 @@
 package io.github.xiaocan.model;
 
+import java.math.BigDecimal;
+
 public record StoreAutoClaimRequest(
         Long silkId,
         String xSivir,
@@ -8,6 +10,15 @@ public record StoreAutoClaimRequest(
         String latitude,
         Long promotionId,
         Integer storePlatform,
-        Long redpackId
+        Long redpackId,
+        Integer storeId,
+        BigDecimal storePlatformOrderMoney,
+        BigDecimal promotionSilkAmount
 ) {
+    public StoreAutoClaimRequest(Long silkId, String xSivir, Integer cityCode,
+                                 String longitude, String latitude, Long promotionId,
+                                 Integer storePlatform, Long redpackId) {
+        this(silkId, xSivir, cityCode, longitude, latitude, promotionId, storePlatform,
+                redpackId, null, null, null);
+    }
 }
