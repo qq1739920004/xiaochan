@@ -20,4 +20,6 @@ public class StoreExtNotifyConfig extends AbstractExtNotifyConfig{
      */
     private NotifyFrequencyEnums remindFrequency = NotifyFrequencyEnums.ONCE;
 
+    private StoreAutoClaimConfig autoClaimConfig = new StoreAutoClaimConfig();
+
 }
