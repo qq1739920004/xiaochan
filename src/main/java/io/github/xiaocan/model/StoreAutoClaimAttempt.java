@@ -8,7 +8,11 @@ public record StoreAutoClaimAttempt(
         StoreAutoClaimStopReason stopReason
 ) {
     public static StoreAutoClaimAttempt retryable(String message) {
-        return new StoreAutoClaimAttempt(null, message, null, true, null);
+        return retryable(null, message);
+    }
+
+    public static StoreAutoClaimAttempt retryable(Integer code, String message) {
+        return new StoreAutoClaimAttempt(code, message, null, true, null);
     }
 
     public static StoreAutoClaimAttempt success(Integer code, String message, Long promotionOrderId) {

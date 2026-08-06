@@ -168,7 +168,7 @@ public class XiaochanHttp {
                     .body(requestParts.body())
                     .execute();
             if (!response.isOk()) {
-                return StoreAutoClaimAttempt.retryable("HTTP 状态码: " + response.getStatus());
+                return classifyStoreClaimHttpFailure(response.getStatus());
             }
             JSONObject result = JSONObject.parseObject(response.body());
             Integer verifyMethod = result.getInteger("verify_method");
@@ -191,6 +191,17 @@ public class XiaochanHttp {
                 response.close();
             }
         }
+    }
+
+    static StoreAutoClaimAttempt classifyStoreClaimHttpFailure(int status) {
+        String message = "HTTP 状态码: " + status;
+        if (status == 401 || status == 403) {
+            return StoreAutoClaimAttempt.stop(status, message, StoreAutoClaimStopReason.AUTH_INVALID);
+        }
+        if (status >= 400 && status < 500 && status != 429) {
+            return StoreAutoClaimAttempt.stop(status, message, StoreAutoClaimStopReason.BUSINESS_FAILURE);
+        }
+        return StoreAutoClaimAttempt.retryable(status, message);
     }
 
     private static StoreAutoClaimStopReason classifyStoreClaimFailure(String message) {

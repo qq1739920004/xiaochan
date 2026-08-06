@@ -1,5 +1,7 @@
 package io.github.xiaocan.http;
 
+import io.github.xiaocan.model.StoreAutoClaimAttempt;
+import io.github.xiaocan.model.StoreAutoClaimStopReason;
 import io.github.xiaocan.model.StoreAutoClaimRequest;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +32,23 @@ class XiaochanHttpStoreAutoClaimTest {
         assertTrue(first.body().contains("\"redpack_id\":123"));
         assertNotEquals(first.headers().get("X-Nami"), second.headers().get("X-Nami"));
         assertNotEquals(first.headers().get("X-Session-Id"), second.headers().get("X-Session-Id"));
+    }
+
+    @Test
+    void treatsUnauthorizedHttpResponseAsTerminal() {
+        StoreAutoClaimAttempt attempt = XiaochanHttp.classifyStoreClaimHttpFailure(401);
+
+        assertFalse(attempt.retryable());
+        assertEquals(401, attempt.code());
+        assertEquals(StoreAutoClaimStopReason.AUTH_INVALID, attempt.stopReason());
+    }
+
+    @Test
+    void keepsServerErrorsRetryable() {
+        StoreAutoClaimAttempt attempt = XiaochanHttp.classifyStoreClaimHttpFailure(502);
+
+        assertTrue(attempt.retryable());
+        assertEquals(502, attempt.code());
     }
 
     private StoreAutoClaimRequest request(Long redpackId) {

@@ -194,6 +194,31 @@ class StoreAutoClaimTaskTest {
     }
 
     @Test
+    void doesNotRepeatInvalidAuthActivityOnNextPoll() {
+        MonitorConfigEntity config = keywordConfig();
+        LocationEntity location = location();
+        when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
+                .thenReturn(List.of(config));
+        when(locationService.getById(9L)).thenReturn(location);
+        when(xiaoChanService.searchList("测试门店", 310114, "121.4", "31.2"))
+                .thenReturn(List.of(activeStore("测试门店", "store-1", 2, "16.00")));
+        when(claimService.execute(any(), any(), any()))
+                .thenReturn(new StoreAutoClaimResult(1, false, 401, "HTTP 状态码: 401",
+                        null, StoreAutoClaimStopReason.AUTH_INVALID));
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(taskScheduler).execute(any(Runnable.class));
+
+        StoreAutoClaimTask task = new StoreAutoClaimTask(
+                configService, locationService, xiaoChanService, claimService, taskScheduler);
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0, 2));
+
+        verify(claimService).execute(eq(config), eq(location), any(StoreInfo.class));
+    }
+
+    @Test
     void keywordMonitorDoesNotClaimDifferentStoreName() {
         MonitorConfigEntity config = keywordConfig();
         LocationEntity location = location();
