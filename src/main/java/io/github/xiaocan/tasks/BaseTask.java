@@ -140,9 +140,19 @@ public class BaseTask {
             entity.setUserId(notifyConfig.getUserId());
             entity.setNotifyConfigId(notifyConfig.getId());
             entity.setNotifyType(notifyConfig.getType());
+            entity.setPromotionId(parseInteger(storeInfo.getPromotionId()));
+            entity.setDistance(parseInteger(storeInfo.getDistance()));
             return entity;
         }).toList();
         storePushedHistoryService.saveBatch(entities);
+    }
+
+    private Integer parseInteger(String value) {
+        try {
+            return value == null ? null : Integer.valueOf(value);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     /**

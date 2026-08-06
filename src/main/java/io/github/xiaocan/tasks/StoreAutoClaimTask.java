@@ -83,43 +83,38 @@ public class StoreAutoClaimTask {
         if (!isMonitorWindowActive(config, now)) {
             return;
         }
-        String keyword;
-        List<StoreInfo> matchedStores;
-        StoreAutoClaimConfig autoClaim;
-        if (config.getType() == MonitorTypeEnums.STORE_ACTIVITY) {
-            StoreExtNotifyConfig ext = JSON.parseObject(config.getExtConfig(), StoreExtNotifyConfig.class);
-            autoClaim = ext == null ? null : ext.getAutoClaimConfig();
-            if (ext == null || ext.getStoreInfo() == null || !StringUtils.hasText(ext.getStoreInfo().getName())) {
-                return;
-            }
-            keyword = ext.getStoreInfo().getName();
-        } else if (config.getType() == MonitorTypeEnums.STORE_KEYWORD) {
-            StoreKeywordExtNotifyConfig ext = JSON.parseObject(config.getExtConfig(), StoreKeywordExtNotifyConfig.class);
-            autoClaim = ext == null ? null : ext.getAutoClaimConfig();
-            if (ext == null || !StringUtils.hasText(ext.getKeyword())) {
-                return;
-            }
-            keyword = ext.getKeyword().trim();
-        } else {
-            return;
-        }
-        if (autoClaim == null || !Boolean.TRUE.equals(autoClaim.getEnabled())) {
-            return;
-        }
+        ClaimContext context = readClaimContext(config);
+        if (context == null) return;
         LocationEntity location = locationService.getById(config.getLocationId());
         if (location == null) {
             log.warn("自动抢单监控位置不存在 configId={}, locationId={}", config.getId(), config.getLocationId());
             return;
         }
         List<StoreInfo> stores = xiaoChanService.searchList(
-                keyword, location.getCityCode(), location.getLongitude(), location.getLatitude());
-        matchedStores = matchStores(config, stores, keyword);
+                context.keyword(), location.getCityCode(), location.getLongitude(), location.getLatitude());
+        submitCandidate(config, location, stores, context, now);
+    }
+
+    /**
+     * 复用监控任务已经发现的活动，避免通知查询和自动抢单查询出现短暂结果差异。
+     */
+    void claimDiscovered(MonitorConfigEntity config, LocationEntity location,
+                         List<StoreInfo> stores, LocalDateTime now) {
+        if (!isMonitorWindowActive(config, now) || location == null) return;
+        ClaimContext context = readClaimContext(config);
+        if (context == null) return;
+        submitCandidate(config, location, stores, context, now);
+    }
+
+    private void submitCandidate(MonitorConfigEntity config, LocationEntity location,
+                                 List<StoreInfo> stores, ClaimContext context, LocalDateTime now) {
+        List<StoreInfo> matchedStores = matchStores(config, stores, context.keyword());
         if (matchedStores.isEmpty()) {
             return;
         }
         if (hasAmbiguousStoreIdentity(config, matchedStores)) {
             log.warn("关键词自动抢单跳过歧义门店 configId={}, keyword={}, matchedCount={}",
-                    config.getId(), keyword, matchedStores.size());
+                    config.getId(), context.keyword(), matchedStores.size());
             return;
         }
         List<StoreInfo> activeStores = matchedStores.stream()
@@ -133,12 +128,40 @@ public class StoreAutoClaimTask {
         if (handledKeys.contains(key) || !inFlightKeys.add(key)) {
             return;
         }
+        log.info("自动抢单候选已提交 configId={}, store={}, promotionId={}, condition={}",
+                config.getId(), candidate.getName(), candidate.getPromotionId(), candidate.getRebateCondition());
         try {
             taskScheduler.execute(() -> executeClaim(config, location, candidate, key));
         } catch (RuntimeException e) {
             inFlightKeys.remove(key);
             throw e;
         }
+    }
+
+    private ClaimContext readClaimContext(MonitorConfigEntity config) {
+        String keyword;
+        StoreAutoClaimConfig autoClaim;
+        if (config.getType() == MonitorTypeEnums.STORE_ACTIVITY) {
+            StoreExtNotifyConfig ext = JSON.parseObject(config.getExtConfig(), StoreExtNotifyConfig.class);
+            autoClaim = ext == null ? null : ext.getAutoClaimConfig();
+            if (ext == null || ext.getStoreInfo() == null || !StringUtils.hasText(ext.getStoreInfo().getName())) {
+                return null;
+            }
+            keyword = ext.getStoreInfo().getName().trim();
+        } else if (config.getType() == MonitorTypeEnums.STORE_KEYWORD) {
+            StoreKeywordExtNotifyConfig ext = JSON.parseObject(config.getExtConfig(), StoreKeywordExtNotifyConfig.class);
+            autoClaim = ext == null ? null : ext.getAutoClaimConfig();
+            if (ext == null || !StringUtils.hasText(ext.getKeyword())) {
+                return null;
+            }
+            keyword = ext.getKeyword().trim();
+        } else {
+            return null;
+        }
+        if (autoClaim == null || !Boolean.TRUE.equals(autoClaim.getEnabled())) {
+            return null;
+        }
+        return new ClaimContext(keyword);
     }
 
     private void executeClaim(MonitorConfigEntity config, LocationEntity location,
@@ -201,6 +224,9 @@ public class StoreAutoClaimTask {
 
     private <T> Stream<T> safeList(List<T> values) {
         return values == null ? Stream.empty() : values.stream();
+    }
+
+    private record ClaimContext(String keyword) {
     }
 
     static boolean isActiveAt(StoreInfo store, LocalTime now) {

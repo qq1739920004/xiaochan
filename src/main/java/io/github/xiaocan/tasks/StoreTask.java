@@ -37,6 +37,8 @@ public class StoreTask extends BaseTask {
     private MonitoryConfigService monitoryConfigService;
     @Resource
     private StorePushedHistoryService storePushedHistoryService;
+    @Resource
+    private StoreAutoClaimTask storeAutoClaimTask;
 
 
     /**
@@ -104,6 +106,7 @@ public class StoreTask extends BaseTask {
         }
         savePushedHistory(notifyConfig, availableStores);
         afterSuccess(notifyConfig, availableStores);
+        storeAutoClaimTask.claimDiscovered(notifyConfig, location, availableStores, LocalDateTime.now());
         sendMessage(notifyConfig, availableStores, location);
     }
 
@@ -146,9 +149,27 @@ public class StoreTask extends BaseTask {
                     .filter(storeInfo -> storeKeywordExtNotifyConfig.getLimitDistance() == null
                             || !storeKeywordExtNotifyConfig.getLimitDistance()
                             || (storeInfo.getDistance() != null && Long.parseLong(storeInfo.getDistance()) <= 3500))
-                    .filter(storeInfo -> storePushedHistoryService
-                            .findByNotifyIdAndStoreIdAll(notifyConfig.getId(), storeInfo.getStoreId()) == null)
+                    .filter(storeInfo -> !hasPushedActivity(notifyConfig, storeInfo))
                     .toList();
+        }
+    }
+
+    private boolean hasPushedActivity(MonitorConfigEntity notifyConfig, StoreInfo storeInfo) {
+        Integer promotionId = parseInteger(storeInfo.getPromotionId());
+        if (promotionId == null) {
+            return storePushedHistoryService
+                    .findByNotifyIdAndStoreIdAll(notifyConfig.getId(), storeInfo.getStoreId()) != null;
+        }
+        return storePushedHistoryService.findByNotifyIdAndActivity(
+                notifyConfig.getId(), storeInfo.getStoreId(), promotionId,
+                storeInfo.getType(), storeInfo.getRebateCondition()) != null;
+    }
+
+    private Integer parseInteger(String value) {
+        try {
+            return value == null ? null : Integer.valueOf(value);
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 

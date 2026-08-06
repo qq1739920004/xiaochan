@@ -111,6 +111,26 @@ class StoreAutoClaimTaskTest {
     }
 
     @Test
+    void claimsFromTheActivityDiscoveredByTheMonitor() {
+        MonitorConfigEntity config = keywordConfig();
+        LocationEntity location = location();
+        StoreInfo discovered = activeStore("测试门店", "store-1", 99, "12.00");
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(taskScheduler).execute(any(Runnable.class));
+        when(claimService.execute(any(), any(), any()))
+                .thenReturn(new StoreAutoClaimResult(1, true, 0, "抢单成功", 888L, StoreAutoClaimStopReason.SUCCESS));
+
+        StoreAutoClaimTask task = new StoreAutoClaimTask(
+                configService, locationService, xiaoChanService, claimService, taskScheduler);
+        task.claimDiscovered(config, location, List.of(discovered),
+                java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
+
+        verify(claimService).execute(config, location, discovered);
+    }
+
+    @Test
     void retriesSameActivityOnNextPollAfterTransportFailure() {
         MonitorConfigEntity config = keywordConfig();
         LocationEntity location = location();

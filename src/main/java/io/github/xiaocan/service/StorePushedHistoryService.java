@@ -19,4 +19,8 @@ public interface StorePushedHistoryService extends IService<StorePushedHistoryEn
     StorePushedHistoryEntity findByNotifyIdAndStoreIdToday(Integer notifyId, Integer storeId);
 
     StorePushedHistoryEntity findByNotifyIdAndStoreIdAll(Integer notifyId, Integer storeId);
+
+    StorePushedHistoryEntity findByNotifyIdAndActivity(Integer notifyId, Integer storeId,
+                                                        Integer promotionId, Integer type,
+                                                        Integer rebateCondition);
 }
