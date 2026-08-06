@@ -11,6 +11,7 @@ import io.github.xiaocan.service.LocationService;
 import io.github.xiaocan.service.MonitoryConfigService;
 import io.github.xiaocan.service.StoreAutoClaimService;
 import io.github.xiaocan.service.XiaoChanService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -21,13 +22,24 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class StoreAutoClaimTaskTest {
+
+    @BeforeEach
+    void returnsNoConfigsForTheOtherMonitorTypeByDefault() {
+        lenient().when(configService.list(MonitorTypeEnums.STORE_ACTIVITY, MonitorConfigStatusEnums.ENABLE))
+                .thenReturn(List.of());
+        lenient().when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
+                .thenReturn(List.of());
+    }
+
     @Mock
     private MonitoryConfigService configService;
     @Mock
@@ -107,7 +119,7 @@ class StoreAutoClaimTaskTest {
                 configService, locationService, xiaoChanService, claimService, taskScheduler);
         task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
 
-        verify(claimService).execute(config, location, org.mockito.ArgumentMatchers.any(StoreInfo.class));
+        verify(claimService).execute(eq(config), eq(location), any(StoreInfo.class));
     }
 
     @Test
@@ -153,7 +165,7 @@ class StoreAutoClaimTaskTest {
         task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0, 2));
 
         verify(claimService, org.mockito.Mockito.times(2))
-                .execute(config, location, org.mockito.ArgumentMatchers.any(StoreInfo.class));
+                .execute(eq(config), eq(location), any(StoreInfo.class));
     }
 
     @Test
@@ -178,7 +190,7 @@ class StoreAutoClaimTaskTest {
         task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
         task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0, 2));
 
-        verify(claimService).execute(config, location, org.mockito.ArgumentMatchers.any(StoreInfo.class));
+        verify(claimService).execute(eq(config), eq(location), any(StoreInfo.class));
     }
 
     @Test
@@ -223,6 +235,8 @@ class StoreAutoClaimTaskTest {
         LocationEntity location = location();
         StoreInfo first = activeStore("测试门店", null, 99, "20.00");
         StoreInfo second = activeStore("测试门店", null, 2, "30.00");
+        first.setStoreId(null);
+        second.setStoreId(null);
         when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
                 .thenReturn(List.of(config));
         when(locationService.getById(9L)).thenReturn(location);

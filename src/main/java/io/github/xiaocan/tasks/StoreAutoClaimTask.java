@@ -261,10 +261,11 @@ public class StoreAutoClaimTask {
         try {
             LocalTime start = LocalTime.parse(store.getStartTime(), TIME_FORMAT);
             LocalTime end = LocalTime.parse(store.getEndTime(), TIME_FORMAT);
+            LocalTime currentMinute = now.withSecond(0).withNano(0);
             if (end.isBefore(start)) {
-                return !now.isBefore(start) || !now.isAfter(end);
+                return !currentMinute.isBefore(start) || !currentMinute.isAfter(end);
             }
-            return !now.isBefore(start) && now.isBefore(end.plusMinutes(1));
+            return !currentMinute.isBefore(start) && !currentMinute.isAfter(end);
         } catch (DateTimeParseException e) {
             log.warn("活动时间格式无法解析，按可抢处理 storeId={}, start={}, end={}",
                     store.getStoreId(), store.getStartTime(), store.getEndTime());
