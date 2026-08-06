@@ -41,6 +41,7 @@ const autoClaimHistoryDialogVisible = ref(false)
 const autoClaimHistoryLoading = ref(false)
 const autoClaimHistoryList = ref<any[]>([])
 const autoClaimHistoryName = ref('')
+const xiaocanCredentialConfigured = ref(false)
 
 // 对话框相关
 const dialogVisible = ref(false)
@@ -266,6 +267,16 @@ async function loadLocations() {
   }
 }
 
+async function loadXiaocanCredentialStatus() {
+  try {
+    const response = await api.get('/api/brand-card/config')
+    const config = response.data.data
+    xiaocanCredentialConfigured.value = Boolean(config?.silkId && config?.xSivirMasked)
+  } catch {
+    xiaocanCredentialConfigured.value = false
+  }
+}
+
 function resetForm() {
   formRef.value?.resetFields()
   form.locationId = null
@@ -319,6 +330,12 @@ function showEditDialog(config: any) {
   if (config.type === 'STORE_KEYWORD' && config.storeKeywordExtNotifyConfig) {
     form.storeKeywordExtNotifyConfig.keyword = config.storeKeywordExtNotifyConfig.keyword
     form.storeKeywordExtNotifyConfig.limitDistance = config.storeKeywordExtNotifyConfig.limitDistance !== false
+    form.autoClaimConfig = {
+      enabled: Boolean(config.storeKeywordExtNotifyConfig.autoClaimConfig?.enabled),
+      maxAttempts: config.storeKeywordExtNotifyConfig.autoClaimConfig?.maxAttempts ?? 5,
+      minIntervalMs: config.storeKeywordExtNotifyConfig.autoClaimConfig?.minIntervalMs ?? 150,
+      maxIntervalMs: config.storeKeywordExtNotifyConfig.autoClaimConfig?.maxIntervalMs ?? 350,
+    }
   }
   dialogVisible.value = true
 }
@@ -351,14 +368,20 @@ function submitForm() {
             }
           }
           if (currentEditConfig.value.type === 'STORE_KEYWORD') {
-            requestData.storeKeywordExtNotifyConfig = form.storeKeywordExtNotifyConfig
+            requestData.storeKeywordExtNotifyConfig = {
+              ...form.storeKeywordExtNotifyConfig,
+              autoClaimConfig: { ...form.autoClaimConfig },
+            }
           }
         } else {
           requestData.type = configType.value
           if (configType.value === 'MINIMUM_PAY') {
             requestData.minimumPayExtNotifyConfig = form.minimumPayExtNotifyConfig
           } else if (configType.value === 'STORE_KEYWORD') {
-            requestData.storeKeywordExtNotifyConfig = form.storeKeywordExtNotifyConfig
+            requestData.storeKeywordExtNotifyConfig = {
+              ...form.storeKeywordExtNotifyConfig,
+              autoClaimConfig: { ...form.autoClaimConfig },
+            }
           }
         }
 
@@ -555,6 +578,7 @@ onMounted(async () => {
   await authState?.waitForAuth()
   loadConfigList()
   loadLocations()
+  loadXiaocanCredentialStatus()
 })
 
 onUnmounted(() => {
@@ -642,6 +666,12 @@ onUnmounted(() => {
               >
                 <span>限距离制：{{ config.storeKeywordExtNotifyConfig.limitDistance !== false ? '开启（≤3500米）' : '关闭' }}</span>
               </p>
+              <p
+                v-if="config.type === 'STORE_KEYWORD' && config.storeKeywordExtNotifyConfig"
+                class="info-item"
+              >
+                <span>自动抢单：{{ config.storeKeywordExtNotifyConfig.autoClaimConfig?.enabled ? '已启用' : '未启用' }}</span>
+              </p>
               <template
                 v-if="
                   config.type === 'STORE_ACTIVITY' &&
@@ -683,7 +713,8 @@ onUnmounted(() => {
                 运行记录
               </el-button>
               <el-button
-                v-if="config.type === 'STORE_ACTIVITY' && config.storeExtNotifyConfig?.autoClaimConfig?.enabled"
+                v-if="(config.type === 'STORE_ACTIVITY' && config.storeExtNotifyConfig?.autoClaimConfig?.enabled)
+                  || (config.type === 'STORE_KEYWORD' && config.storeKeywordExtNotifyConfig?.autoClaimConfig?.enabled)"
                 size="small"
                 class="history-btn"
                 @click="showAutoClaimHistory(config)"
@@ -828,6 +859,10 @@ onUnmounted(() => {
               <label>限距离制：</label>
               <span>{{ currentDetail.storeKeywordExtNotifyConfig.limitDistance !== false ? '开启（≤3500米）' : '关闭' }}</span>
             </div>
+            <div class="detail-item">
+              <label>自动抢单：</label>
+              <span>{{ currentDetail.storeKeywordExtNotifyConfig.autoClaimConfig?.enabled ? '已启用' : '未启用' }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -937,11 +972,22 @@ onUnmounted(() => {
           </el-radio-group>
         </el-form-item>
 
-        <template v-if="isEdit && currentEditConfig?.type === 'STORE_ACTIVITY'">
+        <template
+          v-if="(isEdit && ['STORE_ACTIVITY', 'STORE_KEYWORD'].includes(currentEditConfig?.type))
+            || (!isEdit && configType === 'STORE_KEYWORD')"
+        >
           <el-form-item label="启用自动抢单">
             <el-switch v-model="form.autoClaimConfig.enabled" />
             <span class="form-tip">活动到可抢时间后自动选择返利更优的活动</span>
           </el-form-item>
+          <div class="credential-hint">
+            <span :class="xiaocanCredentialConfigured ? 'credential-ok' : 'credential-missing'">
+              小蚕登录态：{{ xiaocanCredentialConfigured ? '已配置' : '未配置' }}
+            </span>
+            <el-button link type="primary" @click="router.push('/brand-card-claim')">
+              去配置 silk_id / X-Sivir
+            </el-button>
+          </div>
           <el-row v-if="form.autoClaimConfig.enabled" :gutter="16">
             <el-col :span="8">
               <el-form-item label="最大次数">
@@ -1702,6 +1748,22 @@ onUnmounted(() => {
   color: #999;
   margin-top: 8px;
   line-height: 1.5;
+}
+
+.credential-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -6px 0 16px 110px;
+  font-size: 12px;
+}
+
+.credential-ok {
+  color: #389e0d;
+}
+
+.credential-missing {
+  color: #d46b08;
 }
 
 // ============================================

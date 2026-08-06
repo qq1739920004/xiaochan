@@ -1,7 +1,8 @@
 package io.github.xiaocan.tasks;
 
-import io.github.xiaocan.model.StoreAutoClaimConfig;
 import io.github.xiaocan.model.StoreInfo;
+import io.github.xiaocan.model.StoreAutoClaimResult;
+import io.github.xiaocan.model.StoreAutoClaimStopReason;
 import io.github.xiaocan.model.entity.LocationEntity;
 import io.github.xiaocan.model.entity.MonitorConfigEntity;
 import io.github.xiaocan.model.enums.MonitorConfigStatusEnums;
@@ -22,6 +23,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -54,6 +56,8 @@ class StoreAutoClaimTaskTest {
             ((Runnable) invocation.getArgument(0)).run();
             return null;
         }).when(taskScheduler).execute(any(Runnable.class));
+        when(claimService.execute(any(), any(), any()))
+                .thenReturn(new StoreAutoClaimResult(1, true, 0, "抢单成功", 888L, StoreAutoClaimStopReason.SUCCESS));
 
         StoreAutoClaimTask task = new StoreAutoClaimTask(
                 configService, locationService, xiaoChanService, claimService, taskScheduler);
@@ -80,7 +84,136 @@ class StoreAutoClaimTaskTest {
                 configService, locationService, xiaoChanService, claimService, taskScheduler);
         task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 9, 59));
 
-        org.mockito.Mockito.verifyNoInteractions(claimService, taskScheduler);
+        verifyNoInteractions(claimService, taskScheduler);
+    }
+
+    @Test
+    void keywordMonitorClaimsExactMatchingStoreAfterActivityStarts() {
+        MonitorConfigEntity config = keywordConfig();
+        LocationEntity location = location();
+        when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
+                .thenReturn(List.of(config));
+        when(locationService.getById(9L)).thenReturn(location);
+        when(xiaoChanService.searchList("测试门店", 310114, "121.4", "31.2"))
+                .thenReturn(List.of(activeStore("测试门店", "store-1", 99, "12.00")));
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(taskScheduler).execute(any(Runnable.class));
+        when(claimService.execute(any(), any(), any()))
+                .thenReturn(new StoreAutoClaimResult(1, true, 0, "抢单成功", 888L, StoreAutoClaimStopReason.SUCCESS));
+
+        StoreAutoClaimTask task = new StoreAutoClaimTask(
+                configService, locationService, xiaoChanService, claimService, taskScheduler);
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
+
+        verify(claimService).execute(config, location, org.mockito.ArgumentMatchers.any(StoreInfo.class));
+    }
+
+    @Test
+    void retriesSameActivityOnNextPollAfterTransportFailure() {
+        MonitorConfigEntity config = keywordConfig();
+        LocationEntity location = location();
+        when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
+                .thenReturn(List.of(config));
+        when(locationService.getById(9L)).thenReturn(location);
+        when(xiaoChanService.searchList("测试门店", 310114, "121.4", "31.2"))
+                .thenReturn(List.of(activeStore("测试门店", "store-1", 99, "12.00")));
+        when(claimService.execute(any(), any(), any()))
+                .thenReturn(new StoreAutoClaimResult(5, false, null, "网络超时",
+                        null, StoreAutoClaimStopReason.MAX_ATTEMPTS_REACHED));
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(taskScheduler).execute(any(Runnable.class));
+
+        StoreAutoClaimTask task = new StoreAutoClaimTask(
+                configService, locationService, xiaoChanService, claimService, taskScheduler);
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0, 2));
+
+        verify(claimService, org.mockito.Mockito.times(2))
+                .execute(config, location, org.mockito.ArgumentMatchers.any(StoreInfo.class));
+    }
+
+    @Test
+    void doesNotRepeatTerminalActivityOnNextPoll() {
+        MonitorConfigEntity config = keywordConfig();
+        LocationEntity location = location();
+        when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
+                .thenReturn(List.of(config));
+        when(locationService.getById(9L)).thenReturn(location);
+        when(xiaoChanService.searchList("测试门店", 310114, "121.4", "31.2"))
+                .thenReturn(List.of(activeStore("测试门店", "store-1", 99, "12.00")));
+        when(claimService.execute(any(), any(), any()))
+                .thenReturn(new StoreAutoClaimResult(1, false, 40021, "已抢完",
+                        null, StoreAutoClaimStopReason.SOLD_OUT_OR_EXPIRED));
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(taskScheduler).execute(any(Runnable.class));
+
+        StoreAutoClaimTask task = new StoreAutoClaimTask(
+                configService, locationService, xiaoChanService, claimService, taskScheduler);
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0, 2));
+
+        verify(claimService).execute(config, location, org.mockito.ArgumentMatchers.any(StoreInfo.class));
+    }
+
+    @Test
+    void keywordMonitorDoesNotClaimDifferentStoreName() {
+        MonitorConfigEntity config = keywordConfig();
+        LocationEntity location = location();
+        when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
+                .thenReturn(List.of(config));
+        when(locationService.getById(9L)).thenReturn(location);
+        when(xiaoChanService.searchList("测试门店", 310114, "121.4", "31.2"))
+                .thenReturn(List.of(activeStore("测试门店（分店）", "store-2", 99, "20.00")));
+
+        StoreAutoClaimTask task = new StoreAutoClaimTask(
+                configService, locationService, xiaoChanService, claimService, taskScheduler);
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
+
+        verifyNoInteractions(claimService, taskScheduler);
+    }
+
+    @Test
+    void keywordMonitorDoesNotClaimAmbiguousSameNameStores() {
+        MonitorConfigEntity config = keywordConfig();
+        LocationEntity location = location();
+        when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
+                .thenReturn(List.of(config));
+        when(locationService.getById(9L)).thenReturn(location);
+        when(xiaoChanService.searchList("测试门店", 310114, "121.4", "31.2"))
+                .thenReturn(List.of(
+                        activeStore("测试门店", "store-1", 99, "20.00"),
+                        activeStore("测试门店", "store-2", 2, "30.00")));
+
+        StoreAutoClaimTask task = new StoreAutoClaimTask(
+                configService, locationService, xiaoChanService, claimService, taskScheduler);
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
+
+        verifyNoInteractions(claimService, taskScheduler);
+    }
+
+    @Test
+    void keywordMonitorDoesNotClaimMultipleStoresWithoutIdentity() {
+        MonitorConfigEntity config = keywordConfig();
+        LocationEntity location = location();
+        StoreInfo first = activeStore("测试门店", null, 99, "20.00");
+        StoreInfo second = activeStore("测试门店", null, 2, "30.00");
+        when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
+                .thenReturn(List.of(config));
+        when(locationService.getById(9L)).thenReturn(location);
+        when(xiaoChanService.searchList("测试门店", 310114, "121.4", "31.2"))
+                .thenReturn(List.of(first, second));
+
+        StoreAutoClaimTask task = new StoreAutoClaimTask(
+                configService, locationService, xiaoChanService, claimService, taskScheduler);
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
+
+        verifyNoInteractions(claimService, taskScheduler);
     }
 
     private MonitorConfigEntity config() {
@@ -97,6 +230,23 @@ class StoreAutoClaimTaskTest {
         return config;
     }
 
+    private MonitorConfigEntity keywordConfig() {
+        MonitorConfigEntity config = config();
+        config.setType(MonitorTypeEnums.STORE_KEYWORD);
+        config.setExtConfig("{\"keyword\":\"测试门店\",\"limitDistance\":false,"
+                + "\"autoClaimConfig\":{\"enabled\":true}}");
+        return config;
+    }
+
+    private LocationEntity location() {
+        LocationEntity location = new LocationEntity();
+        location.setId(9L);
+        location.setCityCode(310114);
+        location.setLongitude("121.4");
+        location.setLatitude("31.2");
+        return location;
+    }
+
     private StoreInfo noReview() {
         StoreInfo store = baseStore(99, "10.00");
         store.setStartTime("10:00");
@@ -106,6 +256,15 @@ class StoreAutoClaimTaskTest {
 
     private StoreInfo higherReview() {
         StoreInfo store = baseStore(2, "12.00");
+        store.setStartTime("10:00");
+        store.setEndTime("22:00");
+        return store;
+    }
+
+    private StoreInfo activeStore(String name, String uniqId, int condition, String rebate) {
+        StoreInfo store = baseStore(condition, rebate);
+        store.setName(name);
+        store.setUniqId(uniqId);
         store.setStartTime("10:00");
         store.setEndTime("22:00");
         return store;

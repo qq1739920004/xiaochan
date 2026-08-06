@@ -1497,6 +1497,10 @@ onBeforeUnmount(() => {
                 <el-switch v-model="notifyConfigForm.autoClaimConfig.enabled" />
                 <span class="form-tip">活动到可抢时间后自动选择返利更优的活动</span>
               </el-form-item>
+              <div class="form-tip credential-link">
+                自动抢单需要小蚕的 silk_id 和 X-Sivir，项目 Token 不参与抢单。
+                <el-button link type="primary" @click="router.push('/brand-card-claim')">去配置登录态</el-button>
+              </div>
               <el-row v-if="notifyConfigForm.autoClaimConfig.enabled" :gutter="16">
                 <el-col :span="8">
                   <el-form-item label="最大次数">
@@ -2609,6 +2613,13 @@ $radius-full: 999px;
   &:active {
     transform: scale(0.96);
   }
+}
+
+.credential-link {
+  margin: -4px 0 14px 110px;
+  color: #7a8791;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .notify-btn {

@@ -158,7 +158,7 @@ onMounted(async () => {
         <div class="panel-header">
           <div>
             <h2>领取配置</h2>
-            <p>每日 09:30:00 开始请求</p>
+            <p>每日 09:30:00 开始请求；凭证同时供监控自动抢单使用</p>
           </div>
           <el-switch v-model="form.enabled" inline-prompt active-text="开" inactive-text="关" />
         </div>
@@ -167,9 +167,10 @@ onMounted(async () => {
           <el-form-item label="silk_id" prop="silkId">
             <el-input-number v-model="form.silkId" :min="1" :controls="false" placeholder="126938104" class="full-width" />
           </el-form-item>
-          <el-form-item label="X-Sivir" prop="xSivir">
+          <el-form-item label="X-Sivir（小蚕登录态）" prop="xSivir">
             <el-input v-model="form.xSivir" type="password" show-password :placeholder="xSivirMasked ? '留空则保留 ' + xSivirMasked : '请输入抓包得到的 X-Sivir'" />
             <p v-if="xSivirMasked" class="field-note">已保存：{{ xSivirMasked }}</p>
+            <p class="field-note">项目网页登录 Token 不用于小蚕接口；自动抢单需要这里的 silk_id 和 X-Sivir。</p>
           </el-form-item>
 
           <div class="time-row">
