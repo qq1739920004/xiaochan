@@ -27,9 +27,11 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -45,6 +47,7 @@ public class StoreAutoClaimTask {
     private final StoreAutoClaimCandidateSelector candidateSelector = new StoreAutoClaimCandidateSelector();
     private final Set<String> handledKeys = ConcurrentHashMap.newKeySet();
     private final Set<String> inFlightKeys = ConcurrentHashMap.newKeySet();
+    private final Map<String, LocalDateTime> lastSkipLogs = new ConcurrentHashMap<>();
 
     public StoreAutoClaimTask(MonitoryConfigService configService,
                               LocationService locationService,
@@ -110,6 +113,7 @@ public class StoreAutoClaimTask {
                                  List<StoreInfo> stores, ClaimContext context, LocalDateTime now) {
         List<StoreInfo> matchedStores = matchStores(config, stores, context.keyword());
         if (matchedStores.isEmpty()) {
+            logSkip(config, context.keyword(), "没有精确匹配门店或距离不满足", stores, now);
             return;
         }
         if (hasAmbiguousStoreIdentity(config, matchedStores)) {
@@ -122,7 +126,10 @@ public class StoreAutoClaimTask {
                 .filter(store -> isActiveAt(store, now.toLocalTime()))
                 .toList();
         StoreInfo candidate = candidateSelector.select(activeStores).orElse(null);
-        if (candidate == null) return;
+        if (candidate == null) {
+            logSkip(config, context.keyword(), "无库存、未到活动时间或评价/返利条件不支持", matchedStores, now);
+            return;
+        }
         String key = now.toLocalDate() + ":" + config.getId() + ":"
                 + candidate.getPromotionId() + ":" + candidate.getRebateCondition();
         if (handledKeys.contains(key) || !inFlightKeys.add(key)) {
@@ -224,6 +231,24 @@ public class StoreAutoClaimTask {
 
     private <T> Stream<T> safeList(List<T> values) {
         return values == null ? Stream.empty() : values.stream();
+    }
+
+    private void logSkip(MonitorConfigEntity config, String keyword, String reason,
+                         List<StoreInfo> stores, LocalDateTime now) {
+        String key = config.getId() + ":" + reason;
+        LocalDateTime previous = lastSkipLogs.putIfAbsent(key, now);
+        if (previous != null && previous.plusMinutes(1).isAfter(now)) {
+            return;
+        }
+        lastSkipLogs.put(key, now);
+        String summary = stores == null ? "[]" : stores.stream()
+                .limit(10)
+                .map(store -> String.format("%s{uniq=%s,distance=%s,left=%s,time=%s-%s,condition=%s,rebate=%s}",
+                        store.getName(), store.getUniqId(), store.getDistance(), store.getLeftNumber(),
+                        store.getStartTime(), store.getEndTime(), store.getRebateCondition(), store.getRebatePrice()))
+                .collect(Collectors.joining(", ", "[", "]"));
+        log.info("自动抢单未提交 configId={}, keyword={}, reason={}, stores={}",
+                config.getId(), keyword, reason, summary);
     }
 
     private record ClaimContext(String keyword) {
