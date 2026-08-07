@@ -46,8 +46,13 @@ async function saveAccount() {
   }
   saving.value = true
   try {
-    const payload: any = { ...form, accountName: form.accountName.trim() }
-    if (!payload.xSivir.trim()) delete payload.xSivir
+    const payload: any = {
+      accountName: form.accountName.trim(),
+      silkId: Number(form.silkId),
+      xVayne: Number(form.xVayne),
+      enabled: Boolean(form.enabled),
+    }
+    if (form.xSivir.trim()) payload.xSivir = form.xSivir.trim()
     if (editingId.value) await api.put(`/api/xiaochan/accounts/${editingId.value}`, payload)
     else await api.post('/api/xiaochan/accounts', payload)
     dialogVisible.value = false
