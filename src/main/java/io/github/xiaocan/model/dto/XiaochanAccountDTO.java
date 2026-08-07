@@ -1,5 +1,6 @@
 package io.github.xiaocan.model.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -11,6 +12,8 @@ public class XiaochanAccountDTO {
     private String accountName;
     @NotNull(message = "silk_id 不能为空")
     private Long silkId;
+    @JsonProperty("xVayne")
+    @JsonAlias({"XVayne", "x_vayne"})
     @NotNull(message = "X-Vayne 不能为空")
     private Long xVayne;
     @JsonProperty("xSivir")
