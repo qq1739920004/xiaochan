@@ -1,15 +1,18 @@
 package io.github.xiaocan.service.impl;
 
 import com.alibaba.fastjson2.JSONObject;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import io.github.xiaocan.config.BusinessException;
 import io.github.xiaocan.mapper.NotifyConfigMapper;
+import io.github.xiaocan.mapper.XiaochanAccountMapper;
 import io.github.xiaocan.model.MinimumPayExtNotifyConfig;
 import io.github.xiaocan.model.StoreExtNotifyConfig;
 import io.github.xiaocan.model.StoreKeywordExtNotifyConfig;
 import io.github.xiaocan.model.dto.monitorConfigDTO;
 import io.github.xiaocan.model.entity.MonitorConfigEntity;
 import io.github.xiaocan.model.entity.UserEntity;
+import io.github.xiaocan.model.entity.XiaochanAccountEntity;
 import io.github.xiaocan.model.enums.MonitorConfigStatusEnums;
 import io.github.xiaocan.model.enums.MonitorTypeEnums;
 import io.github.xiaocan.model.vo.NotifyConfigVO;
@@ -37,6 +40,8 @@ public class MonitoryConfigServiceImpl extends ServiceImpl<NotifyConfigMapper, M
 
     @Resource
     private UserService userService;
+    @Resource
+    private XiaochanAccountMapper xiaochanAccountMapper;
     @Resource
     @Lazy
     private MonitorCronScheduler monitorCronScheduler;
@@ -126,8 +131,10 @@ public class MonitoryConfigServiceImpl extends ServiceImpl<NotifyConfigMapper, M
         }
         BeanUtils.copyProperties(dto, entity);
         if (dto.getType() == MonitorTypeEnums.STORE_ACTIVITY) {
+            validateAccountSelection(user.getId(), dto.getStoreExtNotifyConfig());
             entity.setExtConfig(JSONObject.toJSONString(dto.getStoreExtNotifyConfig()));
         } else if (dto.getType() == MonitorTypeEnums.STORE_KEYWORD) {
+            validateAccountSelection(user.getId(), dto.getStoreKeywordExtNotifyConfig());
             entity.setExtConfig(JSONObject.toJSONString(dto.getStoreKeywordExtNotifyConfig()));
         } else {
             entity.setExtConfig(JSONObject.toJSONString(dto.getMinimumPayExtNotifyConfig()));
@@ -135,6 +142,31 @@ public class MonitoryConfigServiceImpl extends ServiceImpl<NotifyConfigMapper, M
         saveOrUpdate(entity);
         // 配置变更后刷新 cron 调度
         monitorCronScheduler.refresh(entity.getId());
+    }
+
+    private void validateAccountSelection(Integer userId, StoreExtNotifyConfig config) {
+        if (config != null && config.getAutoClaimConfig() != null
+                && Boolean.TRUE.equals(config.getAutoClaimConfig().getEnabled())) {
+            validateAccountSelection(userId, config.getAutoClaimConfig().getAccountId());
+        }
+    }
+
+    private void validateAccountSelection(Integer userId, StoreKeywordExtNotifyConfig config) {
+        if (config != null && config.getAutoClaimConfig() != null
+                && Boolean.TRUE.equals(config.getAutoClaimConfig().getEnabled())) {
+            validateAccountSelection(userId, config.getAutoClaimConfig().getAccountId());
+        }
+    }
+
+    private void validateAccountSelection(Integer userId, Integer accountId) {
+        if (accountId == null) return;
+        XiaochanAccountEntity account = xiaochanAccountMapper.selectOne(new LambdaQueryWrapper<XiaochanAccountEntity>()
+                .eq(XiaochanAccountEntity::getId, accountId)
+                .eq(XiaochanAccountEntity::getUserId, userId)
+                .eq(XiaochanAccountEntity::getEnabled, true));
+        if (account == null) {
+            throw new BusinessException("所选小蚕账号不存在或已停用");
+        }
     }
 
     @Override

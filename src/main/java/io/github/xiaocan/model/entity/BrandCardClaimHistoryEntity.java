@@ -14,6 +14,7 @@ public class BrandCardClaimHistoryEntity {
     private Long id;
     private Integer userId;
     private Integer configId;
+    private Integer accountId;
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private Integer requestCount;

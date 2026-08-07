@@ -14,7 +14,9 @@ public class BrandCardClaimConfigEntity {
     @TableId(type = IdType.AUTO)
     private Integer id;
     private Integer userId;
+    private Integer accountId;
     private Long silkId;
+    private Long xVayne;
     private String xSivir;
     private Boolean enabled;
     private String cron;

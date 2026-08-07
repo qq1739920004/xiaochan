@@ -37,6 +37,8 @@ public class StoreTask extends BaseTask {
     private MonitoryConfigService monitoryConfigService;
     @Resource
     private StorePushedHistoryService storePushedHistoryService;
+    @Resource
+    private StoreAutoClaimTask storeAutoClaimTask;
 
 
     /**
@@ -104,6 +106,7 @@ public class StoreTask extends BaseTask {
         }
         savePushedHistory(notifyConfig, availableStores);
         afterSuccess(notifyConfig, availableStores);
+        storeAutoClaimTask.claimDiscovered(notifyConfig, location, availableStores, LocalDateTime.now());
         sendMessage(notifyConfig, availableStores, location);
     }
 
@@ -136,6 +139,7 @@ public class StoreTask extends BaseTask {
                     .stream()
                     //同一个门店（按 uniqId 匹配，兼容美团赏金无 storeId 的情况）
                     .filter(storeInfo -> storeExtNotifyConfig.getStoreInfo().getUniqId().equals(storeInfo.getUniqId()))
+                    .filter(this::withinDistanceLimit)
                     .filter(storeInfo -> storeInfo.getLeftNumber() > 0)
                     .toList();
         } else {
@@ -145,10 +149,37 @@ public class StoreTask extends BaseTask {
                     .filter(storeInfo -> storeInfo.getLeftNumber() > 0)
                     .filter(storeInfo -> storeKeywordExtNotifyConfig.getLimitDistance() == null
                             || !storeKeywordExtNotifyConfig.getLimitDistance()
-                            || (storeInfo.getDistance() != null && Long.parseLong(storeInfo.getDistance()) <= 3500))
-                    .filter(storeInfo -> storePushedHistoryService
-                            .findByNotifyIdAndStoreIdAll(notifyConfig.getId(), storeInfo.getStoreId()) == null)
+                            || withinDistanceLimit(storeInfo))
+                    .filter(storeInfo -> !hasPushedActivity(notifyConfig, storeInfo))
                     .toList();
+        }
+    }
+
+    private boolean withinDistanceLimit(StoreInfo storeInfo) {
+        if (storeInfo == null || storeInfo.getDistance() == null) return false;
+        try {
+            return Long.parseLong(storeInfo.getDistance()) <= 5000;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private boolean hasPushedActivity(MonitorConfigEntity notifyConfig, StoreInfo storeInfo) {
+        Integer promotionId = parseInteger(storeInfo.getPromotionId());
+        if (promotionId == null) {
+            return storePushedHistoryService
+                    .findByNotifyIdAndStoreIdAll(notifyConfig.getId(), storeInfo.getStoreId()) != null;
+        }
+        return storePushedHistoryService.findByNotifyIdAndActivity(
+                notifyConfig.getId(), storeInfo.getStoreId(), promotionId,
+                storeInfo.getType(), storeInfo.getRebateCondition()) != null;
+    }
+
+    private Integer parseInteger(String value) {
+        try {
+            return value == null ? null : Integer.valueOf(value);
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 
@@ -159,9 +190,15 @@ public class StoreTask extends BaseTask {
         if (!availableStores.isEmpty() && notifyConfig.getType() == MonitorTypeEnums.STORE_ACTIVITY) {
             StoreExtNotifyConfig storeExtNotifyConfig = JSON.parseObject(notifyConfig.getExtConfig(), StoreExtNotifyConfig.class);
             NotifyFrequencyEnums remindFrequency = storeExtNotifyConfig.getRemindFrequency();
-            if (remindFrequency == null || remindFrequency == NotifyFrequencyEnums.ONCE) {
+            if ((remindFrequency == null || remindFrequency == NotifyFrequencyEnums.ONCE)
+                    && !isAutoClaimEnabled(storeExtNotifyConfig)) {
                 monitoryConfigService.toggleStatus(notifyConfig.getId(), MonitorConfigStatusEnums.DISABLE);
             }
         }
+    }
+
+    private boolean isAutoClaimEnabled(StoreExtNotifyConfig config) {
+        return config != null && config.getAutoClaimConfig() != null
+                && Boolean.TRUE.equals(config.getAutoClaimConfig().getEnabled());
     }
 }

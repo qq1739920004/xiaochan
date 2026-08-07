@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 @Data
 public class BrandCardClaimHistoryVO {
     private Long id;
+    private Integer accountId;
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private Integer requestCount;

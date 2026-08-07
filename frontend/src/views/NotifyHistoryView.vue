@@ -177,6 +177,7 @@ function getNotifyTypeName(notifyType: string) {
   const types: Record<string, string> = {
     STORE_ACTIVITY: '指定门店',
     MINIMUM_PAY: '最小实付',
+    STORE_KEYWORD: '门店关键字',
   }
   return types[notifyType] || '未知'
 }
@@ -185,6 +186,7 @@ function getNotifyTypeClass(notifyType: string) {
   const classes: Record<string, string> = {
     STORE_ACTIVITY: 'type-tag type-store',
     MINIMUM_PAY: 'type-tag type-pay',
+    STORE_KEYWORD: 'type-tag type-store',
   }
   return classes[notifyType] || 'type-tag'
 }

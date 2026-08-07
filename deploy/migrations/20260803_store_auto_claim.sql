@@ -1,0 +1,27 @@
+-- 2026年8月3日 监控门店自动抢单
+CREATE TABLE IF NOT EXISTS `store_auto_claim_history` (
+    `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `user_id` int NOT NULL COMMENT '项目用户ID',
+    `monitor_config_id` int NOT NULL COMMENT '监控配置ID',
+    `brand_config_id` int DEFAULT NULL COMMENT '大牌券配置ID',
+    `store_id` int DEFAULT NULL COMMENT '门店ID',
+    `store_name` varchar(255) DEFAULT NULL COMMENT '门店名称',
+    `promotion_id` bigint DEFAULT NULL COMMENT '活动ID',
+    `store_platform` int DEFAULT NULL COMMENT '平台类型',
+    `rebate_condition` int DEFAULT NULL COMMENT '返利条件：99无需评价，2图文评价',
+    `rebate_price` decimal(10,2) DEFAULT NULL COMMENT '返利金额',
+    `activity_start_time` varchar(16) DEFAULT NULL COMMENT '活动开始时间',
+    `activity_end_time` varchar(16) DEFAULT NULL COMMENT '活动结束时间',
+    `start_time` datetime NOT NULL COMMENT '执行开始时间',
+    `end_time` datetime NOT NULL COMMENT '执行结束时间',
+    `request_count` int NOT NULL DEFAULT 0 COMMENT '请求次数',
+    `success` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否成功',
+    `promotion_order_id` bigint DEFAULT NULL COMMENT '抢单成功订单ID',
+    `result_code` int DEFAULT NULL COMMENT '最终响应码',
+    `result_msg` varchar(500) DEFAULT NULL COMMENT '最终响应消息',
+    `stop_reason` varchar(50) NOT NULL COMMENT '停止原因',
+    PRIMARY KEY (`id`),
+    KEY `idx_store_auto_claim_user_id` (`user_id`),
+    KEY `idx_store_auto_claim_monitor_id` (`monitor_config_id`),
+    KEY `idx_store_auto_claim_start_time` (`start_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='监控门店自动抢单历史';

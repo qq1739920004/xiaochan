@@ -106,6 +106,12 @@ const notifyConfigForm = reactive({
   weeks: [] as string[],
   cron: '',
   remindFrequency: 'ONCE',
+  autoClaimConfig: {
+    enabled: false,
+    maxAttempts: 5,
+    minIntervalMs: 150,
+    maxIntervalMs: 350,
+  },
 })
 const notifyConfigCronCollapseActive = ref<string[]>([])
 const notifyConfigRules = {
@@ -960,6 +966,12 @@ function handleDialogClose() {
   notifyConfigForm.weeks = []
   notifyConfigForm.cron = ''
   notifyConfigForm.remindFrequency = 'ONCE'
+  notifyConfigForm.autoClaimConfig = {
+    enabled: false,
+    maxAttempts: 5,
+    minIntervalMs: 150,
+    maxIntervalMs: 350,
+  }
   notifyConfigCronCollapseActive.value = []
 }
 
@@ -1003,6 +1015,7 @@ async function handleNotifyConfigSave() {
           distance: currentNotifyStore.value.distance,
         },
         remindFrequency: notifyConfigForm.remindFrequency,
+        autoClaimConfig: { ...notifyConfigForm.autoClaimConfig },
       },
     }
     const response = await api.post('/api/notify/config', configData)
@@ -1478,6 +1491,51 @@ onBeforeUnmount(() => {
                   <el-radio label="NONE" value="NONE">不提醒</el-radio>
                 </el-radio-group>
               </el-form-item>
+
+              <el-divider content-position="left">自动抢单</el-divider>
+              <el-form-item label="启用自动抢单">
+                <el-switch v-model="notifyConfigForm.autoClaimConfig.enabled" />
+                <span class="form-tip">活动到可抢时间后自动选择返利更优的活动</span>
+              </el-form-item>
+              <div class="form-tip credential-link">
+                自动抢单需要小蚕的 silk_id 和 X-Sivir，项目 Token 不参与抢单。
+                <el-button link type="primary" @click="router.push('/brand-card-claim')">去配置登录态</el-button>
+              </div>
+              <el-row v-if="notifyConfigForm.autoClaimConfig.enabled" :gutter="16">
+                <el-col :span="8">
+                  <el-form-item label="最大次数">
+                    <el-input-number
+                      v-model="notifyConfigForm.autoClaimConfig.maxAttempts"
+                      :min="1"
+                      :max="30"
+                      controls-position="right"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="最小间隔(ms)">
+                    <el-input-number
+                      v-model="notifyConfigForm.autoClaimConfig.minIntervalMs"
+                      :min="100"
+                      :max="400"
+                      controls-position="right"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="8">
+                  <el-form-item label="最大间隔(ms)">
+                    <el-input-number
+                      v-model="notifyConfigForm.autoClaimConfig.maxIntervalMs"
+                      :min="100"
+                      :max="400"
+                      controls-position="right"
+                      style="width: 100%"
+                    />
+                  </el-form-item>
+                </el-col>
+              </el-row>
             </el-form>
           </div>
 
@@ -2555,6 +2613,13 @@ $radius-full: 999px;
   &:active {
     transform: scale(0.96);
   }
+}
+
+.credential-link {
+  margin: -4px 0 14px 110px;
+  color: #7a8791;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .notify-btn {

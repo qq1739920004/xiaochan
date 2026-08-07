@@ -33,6 +33,11 @@ const router = createRouter({
       name: 'brand-card-claim',
       component: () => import('../views/BrandCardClaimView.vue'),
     },
+    {
+      path: '/xiaochan-accounts',
+      name: 'xiaochan-accounts',
+      component: () => import('../views/XiaochanAccountView.vue'),
+    },
   ],
 })
 

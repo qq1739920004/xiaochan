@@ -37,6 +37,12 @@ const historyPagination = reactive({
   pageSize: 10,
   total: 0,
 })
+const autoClaimHistoryDialogVisible = ref(false)
+const autoClaimHistoryLoading = ref(false)
+const autoClaimHistoryList = ref<any[]>([])
+const autoClaimHistoryName = ref('')
+const xiaocanCredentialConfigured = ref(false)
+const xiaocanAccounts = ref<any[]>([])
 
 // 对话框相关
 const dialogVisible = ref(false)
@@ -64,6 +70,13 @@ const form = reactive({
   weeks: [] as string[],
   cron: '',
   remindFrequency: 'ONCE',
+  autoClaimConfig: {
+    enabled: false,
+    accountId: null as number | null,
+    maxAttempts: 5,
+    minIntervalMs: 150,
+    maxIntervalMs: 350,
+  },
   minimumPayExtNotifyConfig: {
     minimumPay: 1,
   },
@@ -256,6 +269,16 @@ async function loadLocations() {
   }
 }
 
+async function loadXiaocanCredentialStatus() {
+  try {
+    const response = await api.get('/api/xiaochan/accounts', { refresh: false })
+    xiaocanAccounts.value = response.data.data || []
+    xiaocanCredentialConfigured.value = xiaocanAccounts.value.some(account => account.enabled && account.silkId && account.xVayne && account.xSivirMasked)
+  } catch {
+    xiaocanCredentialConfigured.value = false
+  }
+}
+
 function resetForm() {
   formRef.value?.resetFields()
   form.locationId = null
@@ -264,6 +287,13 @@ function resetForm() {
   form.weeks = []
   form.cron = ''
   form.remindFrequency = 'ONCE'
+  form.autoClaimConfig = {
+    enabled: false,
+    accountId: null,
+    maxAttempts: 5,
+    minIntervalMs: 150,
+    maxIntervalMs: 350,
+  }
   form.minimumPayExtNotifyConfig = { minimumPay: 1 }
   form.storeKeywordExtNotifyConfig = { keyword: '', limitDistance: true }
   cronCollapseActive.value = []
@@ -290,6 +320,13 @@ function showEditDialog(config: any) {
   form.weeks = config.weeks ? config.weeks.split(',') : []
   form.cron = config.cron || ''
   form.remindFrequency = config.storeExtNotifyConfig?.remindFrequency || 'ONCE'
+  form.autoClaimConfig = {
+    enabled: Boolean(config.storeExtNotifyConfig?.autoClaimConfig?.enabled),
+    accountId: config.storeExtNotifyConfig?.autoClaimConfig?.accountId ?? null,
+    maxAttempts: config.storeExtNotifyConfig?.autoClaimConfig?.maxAttempts ?? 5,
+    minIntervalMs: config.storeExtNotifyConfig?.autoClaimConfig?.minIntervalMs ?? 150,
+    maxIntervalMs: config.storeExtNotifyConfig?.autoClaimConfig?.maxIntervalMs ?? 350,
+  }
   cronCollapseActive.value = form.cron ? ['cron'] : []
   if (config.type === 'MINIMUM_PAY' && config.minimumPayExtNotifyConfig) {
     form.minimumPayExtNotifyConfig.minimumPay = config.minimumPayExtNotifyConfig.minimumPay
@@ -297,6 +334,13 @@ function showEditDialog(config: any) {
   if (config.type === 'STORE_KEYWORD' && config.storeKeywordExtNotifyConfig) {
     form.storeKeywordExtNotifyConfig.keyword = config.storeKeywordExtNotifyConfig.keyword
     form.storeKeywordExtNotifyConfig.limitDistance = config.storeKeywordExtNotifyConfig.limitDistance !== false
+    form.autoClaimConfig = {
+      enabled: Boolean(config.storeKeywordExtNotifyConfig.autoClaimConfig?.enabled),
+      accountId: config.storeKeywordExtNotifyConfig.autoClaimConfig?.accountId ?? null,
+      maxAttempts: config.storeKeywordExtNotifyConfig.autoClaimConfig?.maxAttempts ?? 5,
+      minIntervalMs: config.storeKeywordExtNotifyConfig.autoClaimConfig?.minIntervalMs ?? 150,
+      maxIntervalMs: config.storeKeywordExtNotifyConfig.autoClaimConfig?.maxIntervalMs ?? 350,
+    }
   }
   dialogVisible.value = true
 }
@@ -325,17 +369,24 @@ function submitForm() {
             requestData.storeExtNotifyConfig = {
               ...currentEditConfig.value.storeExtNotifyConfig,
               remindFrequency: form.remindFrequency,
+              autoClaimConfig: { ...form.autoClaimConfig },
             }
           }
           if (currentEditConfig.value.type === 'STORE_KEYWORD') {
-            requestData.storeKeywordExtNotifyConfig = form.storeKeywordExtNotifyConfig
+            requestData.storeKeywordExtNotifyConfig = {
+              ...form.storeKeywordExtNotifyConfig,
+              autoClaimConfig: { ...form.autoClaimConfig },
+            }
           }
         } else {
           requestData.type = configType.value
           if (configType.value === 'MINIMUM_PAY') {
             requestData.minimumPayExtNotifyConfig = form.minimumPayExtNotifyConfig
           } else if (configType.value === 'STORE_KEYWORD') {
-            requestData.storeKeywordExtNotifyConfig = form.storeKeywordExtNotifyConfig
+            requestData.storeKeywordExtNotifyConfig = {
+              ...form.storeKeywordExtNotifyConfig,
+              autoClaimConfig: { ...form.autoClaimConfig },
+            }
           }
         }
 
@@ -433,6 +484,43 @@ async function loadExecHistory() {
   }
 }
 
+async function showAutoClaimHistory(config: any) {
+  autoClaimHistoryName.value = getLocationName(config.locationId)
+  autoClaimHistoryDialogVisible.value = true
+  autoClaimHistoryLoading.value = true
+  try {
+    const response = await api.post('/api/store-auto-claim/history/page', {
+      monitorConfigId: config.id,
+      pageNum: 1,
+      pageSize: 20,
+    })
+    if (response.data.success) {
+      autoClaimHistoryList.value = response.data.data?.records || []
+    } else {
+      ElMessage.error(response.data.msg || '获取自动抢单记录失败')
+    }
+  } catch {
+    ElMessage.error('获取自动抢单记录失败，请检查网络连接')
+  } finally {
+    autoClaimHistoryLoading.value = false
+  }
+}
+
+function getAutoClaimStopText(reason: string) {
+  const labels: Record<string, string> = {
+    SUCCESS: '抢单成功',
+    SOLD_OUT_OR_EXPIRED: '已抢完或已过期',
+    ALREADY_CLAIMED: '已经领取',
+    AUTH_INVALID: '登录态失效',
+    NEED_VERIFY: '需要验证',
+    MISSING_CREDENTIALS: '未配置凭证',
+    REQUEST_FAILED: '请求失败（仅请求 1 次）',
+    BUSINESS_FAILURE: '业务失败',
+    MAX_ATTEMPTS_REACHED: '达到次数上限',
+  }
+  return labels[reason] || reason || '未知'
+}
+
 function handleHistoryPageChange(page: number) {
   historyPagination.pageNum = page
   loadExecHistory()
@@ -496,6 +584,7 @@ onMounted(async () => {
   await authState?.waitForAuth()
   loadConfigList()
   loadLocations()
+  loadXiaocanCredentialStatus()
 })
 
 onUnmounted(() => {
@@ -581,7 +670,13 @@ onUnmounted(() => {
                 v-if="config.type === 'STORE_KEYWORD' && config.storeKeywordExtNotifyConfig"
                 class="info-item"
               >
-                <span>限距离制：{{ config.storeKeywordExtNotifyConfig.limitDistance !== false ? '开启（≤3500米）' : '关闭' }}</span>
+                <span>限距离制：{{ config.storeKeywordExtNotifyConfig.limitDistance !== false ? '开启（≤5000米）' : '关闭' }}</span>
+              </p>
+              <p
+                v-if="config.type === 'STORE_KEYWORD' && config.storeKeywordExtNotifyConfig"
+                class="info-item"
+              >
+                <span>自动抢单：{{ config.storeKeywordExtNotifyConfig.autoClaimConfig?.enabled ? '已启用' : '未启用' }}</span>
               </p>
               <template
                 v-if="
@@ -599,6 +694,9 @@ onUnmounted(() => {
                 </p>
                 <p class="info-item">
                   <span>提醒频率：{{ getFrequencyText(config.storeExtNotifyConfig.remindFrequency) }}</span>
+                </p>
+                <p class="info-item">
+                  <span>自动抢单：{{ config.storeExtNotifyConfig.autoClaimConfig?.enabled ? '已启用' : '未启用' }}</span>
                 </p>
               </template>
             </div>
@@ -619,6 +717,16 @@ onUnmounted(() => {
                 :disabled="loading"
               >
                 运行记录
+              </el-button>
+              <el-button
+                v-if="(config.type === 'STORE_ACTIVITY' && config.storeExtNotifyConfig?.autoClaimConfig?.enabled)
+                  || (config.type === 'STORE_KEYWORD' && config.storeKeywordExtNotifyConfig?.autoClaimConfig?.enabled)"
+                size="small"
+                class="history-btn"
+                @click="showAutoClaimHistory(config)"
+                :disabled="loading"
+              >
+                抢单记录
               </el-button>
               <el-button
                 v-if="config.type === 'STORE_ACTIVITY' && config.storeExtNotifyConfig?.storeInfo"
@@ -755,7 +863,11 @@ onUnmounted(() => {
             </div>
             <div class="detail-item">
               <label>限距离制：</label>
-              <span>{{ currentDetail.storeKeywordExtNotifyConfig.limitDistance !== false ? '开启（≤3500米）' : '关闭' }}</span>
+              <span>{{ currentDetail.storeKeywordExtNotifyConfig.limitDistance !== false ? '开启（≤5000米）' : '关闭' }}</span>
+            </div>
+            <div class="detail-item">
+              <label>自动抢单：</label>
+              <span>{{ currentDetail.storeKeywordExtNotifyConfig.autoClaimConfig?.enabled ? '已启用' : '未启用' }}</span>
             </div>
           </div>
         </div>
@@ -766,7 +878,7 @@ onUnmounted(() => {
     <el-dialog
       :title="isEdit ? '编辑监控配置' : '新增监控配置'"
       v-model="dialogVisible"
-      width="500px"
+      width="1120px"
       class="monitor-dialog"
       @close="resetForm"
       :close-on-click-modal="false"
@@ -866,6 +978,37 @@ onUnmounted(() => {
           </el-radio-group>
         </el-form-item>
 
+        <template
+          v-if="(isEdit && ['STORE_ACTIVITY', 'STORE_KEYWORD'].includes(currentEditConfig?.type))
+            || (!isEdit && configType === 'STORE_KEYWORD')"
+        >
+          <el-form-item label="启用自动抢单">
+            <el-switch v-model="form.autoClaimConfig.enabled" />
+            <span class="form-tip">活动到可抢时间后自动选择返利更优的活动</span>
+          </el-form-item>
+          <div class="credential-hint">
+            <span :class="xiaocanCredentialConfigured ? 'credential-ok' : 'credential-missing'">
+              小蚕登录态：{{ xiaocanCredentialConfigured ? '已配置' : '未配置' }}
+            </span>
+            <el-button link type="primary" @click="router.push('/xiaochan-accounts')">
+              去配置小蚕账号
+            </el-button>
+          </div>
+          <div v-if="form.autoClaimConfig.enabled" class="auto-claim-settings">
+            <el-form-item label="使用小蚕账号">
+              <el-select v-model="form.autoClaimConfig.accountId" placeholder="请选择账号" style="width: 100%">
+                <el-option
+                  v-for="account in xiaocanAccounts.filter(item => item.enabled)"
+                  :key="account.id"
+                  :label="`${account.accountName}（${account.nickname || account.silkId}）`"
+                  :value="account.id"
+                />
+              </el-select>
+            </el-form-item>
+            <div class="one-shot-hint"><strong>固定请求 1 次</strong><span>活动提前出现时，到开始时间复查库存后只发送一次抢单请求，成功或失败都不重试。</span></div>
+          </div>
+        </template>
+
         <!-- 最小实付金额：新增且类型为 MINIMUM_PAY 时显示，编辑时仅 MINIMUM_PAY 类型显示 -->
         <template
           v-if="!isEdit ? configType === 'MINIMUM_PAY' : currentEditConfig?.type === 'MINIMUM_PAY'"
@@ -894,7 +1037,7 @@ onUnmounted(() => {
           </el-form-item>
           <el-form-item label="限距离制">
             <el-checkbox v-model="form.storeKeywordExtNotifyConfig.limitDistance">
-              开启后仅推送距离 3500 米以内的门店
+              开启后仅推送距离 5000 米以内的门店
             </el-checkbox>
           </el-form-item>
         </template>
@@ -996,6 +1139,37 @@ onUnmounted(() => {
           />
         </div>
       </div>
+    </el-dialog>
+
+    <el-dialog
+      :title="`自动抢单记录 - ${autoClaimHistoryName}`"
+      v-model="autoClaimHistoryDialogVisible"
+      :width="isMobile ? 'calc(100% - 24px)' : '980px'"
+      class="history-dialog"
+    >
+      <el-table
+        v-loading="autoClaimHistoryLoading"
+        :data="autoClaimHistoryList"
+        empty-text="暂无自动抢单记录"
+      >
+        <el-table-column prop="startTime" label="开始时间" min-width="165">
+          <template #default="{ row }">{{ formatDateTime(row.startTime) }}</template>
+        </el-table-column>
+        <el-table-column prop="storeName" label="门店" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="rebateCondition" label="评价" width="90">
+          <template #default="{ row }">{{ row.rebateCondition === 2 ? '图文评价' : '无需评价' }}</template>
+        </el-table-column>
+        <el-table-column prop="rebatePrice" label="返利" width="90" />
+        <el-table-column prop="requestCount" label="请求次数" width="90" align="center" />
+        <el-table-column label="结果" min-width="130">
+          <template #default="{ row }">
+            <el-tag :type="row.success ? 'success' : 'warning'" size="small">
+              {{ row.success ? '抢单成功' : getAutoClaimStopText(row.stopReason) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="resultMsg" label="响应消息" min-width="180" show-overflow-tooltip />
+      </el-table>
     </el-dialog>
   </div>
 </template>
@@ -1387,6 +1561,8 @@ onUnmounted(() => {
 // 对话框移动端适配（需要穿透 scoped）
 .monitor-dialog {
   :deep(.el-dialog) {
+    width: min(1120px, calc(100vw - 32px)) !important;
+    max-width: calc(100vw - 32px);
     @media screen and (max-width: 768px) {
       width: 92% !important;
       margin: 16px auto !important;
@@ -1454,6 +1630,29 @@ onUnmounted(() => {
     }
   }
 }
+
+.auto-claim-settings {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: end;
+}
+
+.one-shot-hint {
+  min-height: 40px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid #d9ecff;
+  border-radius: 6px;
+  background: #f4f9ff;
+  color: #55718a;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.one-shot-hint strong { color: #1677ff; white-space: nowrap; }
 
 // 运行记录对话框适配
 .history-dialog {
@@ -1555,6 +1754,7 @@ onUnmounted(() => {
 }
 
 @media screen and (max-width: 768px) {
+  .auto-claim-settings { grid-template-columns: 1fr; gap: 0; }
   .history-table-wrapper {
     display: none;
   }
@@ -1576,6 +1776,22 @@ onUnmounted(() => {
   color: #999;
   margin-top: 8px;
   line-height: 1.5;
+}
+
+.credential-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -6px 0 16px 110px;
+  font-size: 12px;
+}
+
+.credential-ok {
+  color: #389e0d;
+}
+
+.credential-missing {
+  color: #d46b08;
 }
 
 // ============================================

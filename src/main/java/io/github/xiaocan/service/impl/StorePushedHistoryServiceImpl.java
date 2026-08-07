@@ -58,4 +58,18 @@ public class StorePushedHistoryServiceImpl extends ServiceImpl<StorePushedHistor
                 .last("limit 1")
                 .one();
     }
+
+    @Override
+    public StorePushedHistoryEntity findByNotifyIdAndActivity(Integer notifyId, Integer storeId,
+                                                              Integer promotionId, Integer type,
+                                                              Integer rebateCondition) {
+        return lambdaQuery()
+                .eq(StorePushedHistoryEntity::getNotifyConfigId, notifyId)
+                .eq(StorePushedHistoryEntity::getStoreId, storeId)
+                .eq(promotionId != null, StorePushedHistoryEntity::getPromotionId, promotionId)
+                .eq(type != null, StorePushedHistoryEntity::getType, type)
+                .eq(rebateCondition != null, StorePushedHistoryEntity::getRebateCondition, rebateCondition)
+                .last("limit 1")
+                .one();
+    }
 }

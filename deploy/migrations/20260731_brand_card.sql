@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS `brand_card_claim_config` (
     `id` int NOT NULL AUTO_INCREMENT COMMENT '主键ID',
     `user_id` int NOT NULL COMMENT '项目用户ID',
     `silk_id` bigint NOT NULL COMMENT '小蚕 silk_id',
+    `x_vayne` bigint DEFAULT NULL COMMENT '小蚕用户标识 X-Vayne',
     `x_sivir` varchar(1024) NOT NULL COMMENT '小蚕登录态 X-Sivir',
     `enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否启用',
     `cron` varchar(50) NOT NULL DEFAULT '58 29 9 * * ?' COMMENT '每日准备时间',

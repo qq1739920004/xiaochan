@@ -12,7 +12,7 @@ public class BrandCardClaimTask {
     @Resource
     private BrandCardClaimService brandCardClaimService;
 
-    @Scheduled(cron = "58 29 9 * * ?", zone = "Asia/Shanghai")
+    @Scheduled(fixedDelay = 1000, initialDelay = 1000)
     public void claimBrandCard() {
         log.info("brand card claim preparation started");
         brandCardClaimService.runScheduledClaims();
