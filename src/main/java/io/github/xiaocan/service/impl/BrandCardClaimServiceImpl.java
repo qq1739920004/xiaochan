@@ -6,6 +6,7 @@ import io.github.xiaocan.config.BusinessException;
 import io.github.xiaocan.http.XiaochanHttp;
 import io.github.xiaocan.mapper.BrandCardClaimConfigMapper;
 import io.github.xiaocan.mapper.BrandCardClaimHistoryMapper;
+import io.github.xiaocan.mapper.XiaochanAccountMapper;
 import io.github.xiaocan.model.BrandCardClaimAttemptResult;
 import io.github.xiaocan.model.BrandCardClaimExecutionResult;
 import io.github.xiaocan.model.BrandCardClaimStopReason;
@@ -14,6 +15,7 @@ import io.github.xiaocan.model.dto.BrandCardClaimHistoryQueryDTO;
 import io.github.xiaocan.model.entity.BrandCardClaimConfigEntity;
 import io.github.xiaocan.model.entity.BrandCardClaimHistoryEntity;
 import io.github.xiaocan.model.entity.UserEntity;
+import io.github.xiaocan.model.entity.XiaochanAccountEntity;
 import io.github.xiaocan.model.vo.BrandCardClaimConfigVO;
 import io.github.xiaocan.model.vo.BrandCardClaimHistoryVO;
 import io.github.xiaocan.service.BrandCardClaimExecutor;
@@ -23,27 +25,37 @@ import io.github.xiaocan.utils.PageConvertUtil;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.List;
 
 @Slf4j
 @Service
 public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigMapper, BrandCardClaimConfigEntity>
         implements BrandCardClaimService {
+    private static final ZoneId APP_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String DEFAULT_CRON = "58 29 9 * * ?";
     private static final int DEFAULT_MAX_ATTEMPTS = 12;
     private static final int DEFAULT_MIN_INTERVAL_MS = 100;
     private static final int DEFAULT_MAX_INTERVAL_MS = 400;
+    private final Map<Integer, LocalDateTime> lastScheduledRuns = new ConcurrentHashMap<>();
 
     @Resource
     private UserService userService;
     @Resource
     private BrandCardClaimHistoryMapper historyMapper;
+    @Resource
+    private XiaochanAccountMapper accountMapper;
     @Resource
     private ThreadPoolTaskScheduler taskScheduler;
 
@@ -54,12 +66,54 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     }
 
     @Override
+    public BrandCardClaimConfigVO getConfig(Integer accountId) {
+        UserEntity user = userService.getByCurrentRequest();
+        return toConfigVO(findByAccountId(user.getId(), accountId));
+    }
+
+    @Override
+    public List<BrandCardClaimConfigVO> listConfigs() {
+        UserEntity user = userService.getByCurrentRequest();
+        return list(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<BrandCardClaimConfigEntity>()
+                .eq(BrandCardClaimConfigEntity::getUserId, user.getId())
+                .orderByAsc(BrandCardClaimConfigEntity::getId))
+                .stream().map(this::toConfigVO).toList();
+    }
+
+    @Override
     public void saveConfig(BrandCardClaimConfigDTO dto) {
+        saveConfig(dto.getAccountId(), dto);
+    }
+
+    @Override
+    public void saveConfig(Integer accountId, BrandCardClaimConfigDTO dto) {
         if (dto.getMinIntervalMs() > dto.getMaxIntervalMs()) {
             throw new BusinessException("最小请求间隔不能大于最大请求间隔");
         }
+        String cron = StringUtils.hasText(dto.getCron()) ? dto.getCron().trim() : DEFAULT_CRON;
+        if (!CronExpression.isValidExpression(cron)) {
+            throw new BusinessException("大牌券准备 cron 格式不正确，应为 6 位含秒表达式");
+        }
         UserEntity user = userService.getByCurrentRequest();
-        BrandCardClaimConfigEntity config = findByUserId(user.getId());
+        if (accountId != null && accountMapper != null) {
+            XiaochanAccountEntity account = accountMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<XiaochanAccountEntity>()
+                    .eq(XiaochanAccountEntity::getId, accountId)
+                    .eq(XiaochanAccountEntity::getUserId, user.getId()));
+            if (account == null) {
+                throw new BusinessException("小蚕账号不存在");
+            }
+            if (dto.getSilkId() == null) dto.setSilkId(account.getSilkId());
+            if (dto.getXVayne() == null) dto.setXVayne(account.getXVayne());
+            if (!StringUtils.hasText(dto.getXSivir())) dto.setXSivir(account.getXSivir());
+        }
+        if (accountId != null && accountMapper != null
+                && accountMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<XiaochanAccountEntity>()
+                .eq(XiaochanAccountEntity::getId, accountId)
+                .eq(XiaochanAccountEntity::getUserId, user.getId())) == null) {
+            throw new BusinessException("小蚕账号不存在");
+        }
+        BrandCardClaimConfigEntity config = accountId == null
+                ? findByUserId(user.getId()) : findByAccountId(user.getId(), accountId);
         boolean creating = config == null;
         if (creating) {
             if (!StringUtils.hasText(dto.getXSivir()) || dto.getXVayne() == null) {
@@ -67,11 +121,13 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
             }
             config = new BrandCardClaimConfigEntity();
             config.setUserId(user.getId());
-            config.setCron(DEFAULT_CRON);
+            config.setAccountId(accountId);
         }
         config.setSilkId(dto.getSilkId());
+        config.setAccountId(accountId == null ? config.getAccountId() : accountId);
         config.setXVayne(dto.getXVayne());
         config.setEnabled(dto.getEnabled());
+        config.setCron(cron);
         config.setMaxAttempts(dto.getMaxAttempts());
         config.setMinIntervalMs(dto.getMinIntervalMs());
         config.setMaxIntervalMs(dto.getMaxIntervalMs());
@@ -87,8 +143,13 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
 
     @Override
     public BrandCardClaimExecutionResult claimNow() {
-        BrandCardClaimConfigEntity config = requireCurrentUserConfig();
-        LocalDateTime startTime = LocalDateTime.now();
+        return claimNow(null);
+    }
+
+    @Override
+    public BrandCardClaimExecutionResult claimNow(Integer accountId) {
+        BrandCardClaimConfigEntity config = requireCurrentUserConfig(accountId);
+        LocalDateTime startTime = LocalDateTime.now(APP_ZONE);
         BrandCardClaimAttemptResult attempt = XiaochanHttp.grabExtraBrandCard(
                 config.getSilkId(), config.getXSivir(), config.getXVayne());
         BrandCardClaimExecutionResult result = attempt.retryable()
@@ -100,30 +161,67 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
 
     @Override
     public Page<BrandCardClaimHistoryVO> pageHistory(BrandCardClaimHistoryQueryDTO dto) {
+        return pageHistory(dto, null);
+    }
+
+    @Override
+    public Page<BrandCardClaimHistoryVO> pageHistory(BrandCardClaimHistoryQueryDTO dto, Integer accountId) {
         UserEntity user = userService.getByCurrentRequest();
         Page<BrandCardClaimHistoryEntity> page = new Page<>(dto.getPageNum(), dto.getPageSize());
         Page<BrandCardClaimHistoryEntity> result = historyMapper.selectPage(page,
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<BrandCardClaimHistoryEntity>()
                         .eq(BrandCardClaimHistoryEntity::getUserId, user.getId())
                         .orderByDesc(BrandCardClaimHistoryEntity::getId));
+        if (accountId != null) {
+            BrandCardClaimConfigEntity config = findByAccountId(user.getId(), accountId);
+            if (config == null) {
+                return PageConvertUtil.convert(new Page<>(), BrandCardClaimHistoryVO.class);
+            }
+            result = historyMapper.selectPage(page, new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<BrandCardClaimHistoryEntity>()
+                    .eq(BrandCardClaimHistoryEntity::getUserId, user.getId())
+                    .eq(BrandCardClaimHistoryEntity::getConfigId, config.getId())
+                    .orderByDesc(BrandCardClaimHistoryEntity::getId));
+        }
         return PageConvertUtil.convert(result, BrandCardClaimHistoryVO.class);
     }
 
     @Override
     public void runScheduledClaims() {
+        LocalDateTime now = LocalDateTime.now(APP_ZONE).withNano(0);
+        lastScheduledRuns.entrySet().removeIf(entry -> entry.getValue().toLocalDate().isBefore(now.toLocalDate()));
         list(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<BrandCardClaimConfigEntity>()
                 .eq(BrandCardClaimConfigEntity::getEnabled, true))
                 .stream()
                 .filter(config -> config.getSilkId() != null && config.getXVayne() != null
                         && StringUtils.hasText(config.getXSivir()))
-                .forEach(config -> taskScheduler.execute(() -> runAutomaticClaim(config)));
+                .filter(config -> isPreparationDue(config, now))
+                .forEach(config -> {
+                    LocalDateTime previous = lastScheduledRuns.put(config.getId(), now);
+                    if (previous == null || !previous.equals(now)) {
+                        taskScheduler.execute(() -> runAutomaticClaim(config, preparationTarget(config, now)));
+                    }
+                });
     }
 
-    private void runAutomaticClaim(BrandCardClaimConfigEntity config) {
-        LocalDateTime startTime = LocalDateTime.now();
+    private boolean isPreparationDue(BrandCardClaimConfigEntity config, LocalDateTime now) {
+        String cron = StringUtils.hasText(config.getCron()) ? config.getCron() : DEFAULT_CRON;
+        if (!CronExpression.isValidExpression(cron)) return false;
+        LocalDateTime next = CronExpression.parse(cron).next(now.minusSeconds(1));
+        return next != null && next.withNano(0).equals(now);
+    }
+
+    private Instant preparationTarget(BrandCardClaimConfigEntity config, LocalDateTime preparationTime) {
+        String cron = StringUtils.hasText(config.getCron()) ? config.getCron() : DEFAULT_CRON;
+        LocalDateTime scheduled = CronExpression.parse(cron).next(preparationTime.minusSeconds(1));
+        return (scheduled == null ? preparationTime.plusSeconds(2) : scheduled.plusSeconds(2))
+                .atZone(APP_ZONE).toInstant();
+    }
+
+    private void runAutomaticClaim(BrandCardClaimConfigEntity config, Instant target) {
+        LocalDateTime startTime = LocalDateTime.now(APP_ZONE);
         BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
                 (silkId, xSivir) -> XiaochanHttp.grabExtraBrandCard(silkId, xSivir, config.getXVayne()),
-                Clock.systemDefaultZone(),
+                Clock.system(APP_ZONE),
                 duration -> Thread.sleep(duration.toMillis()),
                 () -> Duration.ofMillis(ThreadLocalRandom.current().nextLong(
                         config.getMinIntervalMs(), config.getMaxIntervalMs() + 1L))
@@ -134,15 +232,17 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 config.getXVayne(),
                 config.getMaxAttempts(),
                 Duration.ofMillis(config.getMinIntervalMs()),
-                Duration.ofMillis(config.getMaxIntervalMs())
+                Duration.ofMillis(config.getMaxIntervalMs()),
+                target
         );
         saveHistory(config, startTime, result);
         log.info("brand card claim completed: configId={}, attempts={}, reason={}",
                 config.getId(), result.attempts(), result.stopReason());
     }
 
-    private BrandCardClaimConfigEntity requireCurrentUserConfig() {
-        BrandCardClaimConfigEntity config = findByUserId(userService.getByCurrentRequest().getId());
+    private BrandCardClaimConfigEntity requireCurrentUserConfig(Integer accountId) {
+        Integer userId = userService.getByCurrentRequest().getId();
+        BrandCardClaimConfigEntity config = accountId == null ? findByUserId(userId) : findByAccountId(userId, accountId);
         if (config == null || config.getXVayne() == null || !StringUtils.hasText(config.getXSivir())) {
             throw new BusinessException("请先保存 silk_id、X-Vayne 与 X-Sivir 配置");
         }
@@ -150,7 +250,13 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     }
 
     private BrandCardClaimConfigEntity findByUserId(Integer userId) {
-        return lambdaQuery().eq(BrandCardClaimConfigEntity::getUserId, userId).one();
+        return lambdaQuery().eq(BrandCardClaimConfigEntity::getUserId, userId)
+                .orderByAsc(BrandCardClaimConfigEntity::getId).last("limit 1").one();
+    }
+
+    private BrandCardClaimConfigEntity findByAccountId(Integer userId, Integer accountId) {
+        return lambdaQuery().eq(BrandCardClaimConfigEntity::getUserId, userId)
+                .eq(BrandCardClaimConfigEntity::getAccountId, accountId).one();
     }
 
     private BrandCardClaimConfigVO toConfigVO(BrandCardClaimConfigEntity config) {
@@ -163,6 +269,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
             vo.setMaxIntervalMs(DEFAULT_MAX_INTERVAL_MS);
             return vo;
         }
+        vo.setAccountId(config.getAccountId());
         vo.setSilkId(config.getSilkId());
         vo.setXVayne(config.getXVayne());
         vo.setXSivirMasked(mask(config.getXSivir()));
@@ -189,8 +296,9 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         BrandCardClaimHistoryEntity history = new BrandCardClaimHistoryEntity();
         history.setUserId(config.getUserId());
         history.setConfigId(config.getId());
+        history.setAccountId(config.getAccountId());
         history.setStartTime(startTime);
-        history.setEndTime(LocalDateTime.now());
+        history.setEndTime(LocalDateTime.now(APP_ZONE));
         history.setRequestCount(result.attempts());
         history.setSuccess(result.success());
         history.setResultCode(result.resultCode());

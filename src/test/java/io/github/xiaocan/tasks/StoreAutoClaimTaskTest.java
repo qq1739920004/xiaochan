@@ -79,7 +79,7 @@ class StoreAutoClaimTaskTest {
     }
 
     @Test
-    void doesNotClaimBeforeActivityStart() {
+    void schedulesActivityBeforeItsStartInsteadOfClaimingEarly() {
         MonitorConfigEntity config = config();
         LocationEntity location = new LocationEntity();
         location.setId(9L);
@@ -96,7 +96,8 @@ class StoreAutoClaimTaskTest {
                 configService, locationService, xiaoChanService, claimService, taskScheduler);
         task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 9, 59));
 
-        verifyNoInteractions(claimService, taskScheduler);
+        verifyNoInteractions(claimService);
+        verify(taskScheduler).schedule(any(Runnable.class), any(java.util.Date.class));
     }
 
     @Test
@@ -143,7 +144,7 @@ class StoreAutoClaimTaskTest {
     }
 
     @Test
-    void retriesSameActivityOnNextPollAfterTransportFailure() {
+    void doesNotRetrySameActivityAfterOneShotTransportFailure() {
         MonitorConfigEntity config = keywordConfig();
         LocationEntity location = location();
         when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
@@ -152,8 +153,8 @@ class StoreAutoClaimTaskTest {
         when(xiaoChanService.searchList("测试门店", 310114, "121.4", "31.2"))
                 .thenReturn(List.of(activeStore("测试门店", "store-1", 99, "12.00")));
         when(claimService.execute(any(), any(), any()))
-                .thenReturn(new StoreAutoClaimResult(5, false, null, "网络超时",
-                        null, StoreAutoClaimStopReason.MAX_ATTEMPTS_REACHED));
+                .thenReturn(new StoreAutoClaimResult(1, false, null, "网络超时",
+                        null, StoreAutoClaimStopReason.REQUEST_FAILED));
         doAnswer(invocation -> {
             ((Runnable) invocation.getArgument(0)).run();
             return null;
@@ -164,7 +165,7 @@ class StoreAutoClaimTaskTest {
         task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
         task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0, 2));
 
-        verify(claimService, org.mockito.Mockito.times(2))
+        verify(claimService)
                 .execute(eq(config), eq(location), any(StoreInfo.class));
     }
 
@@ -339,6 +340,7 @@ class StoreAutoClaimTaskTest {
         store.setRebateCondition(condition);
         store.setRebatePrice(new BigDecimal(rebate));
         store.setLeftNumber(1);
+        store.setDistance("100");
         return store;
     }
 }

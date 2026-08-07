@@ -18,7 +18,7 @@ public class StoreKeywordExtNotifyConfig extends AbstractExtNotifyConfig {
     private String keyword;
 
     /**
-     * 是否限制距离（超过3500米的门店过滤掉），默认true
+     * 是否限制距离（超过5000米的门店过滤掉），默认true
      */
     private Boolean limitDistance = true;
 

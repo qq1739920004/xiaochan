@@ -36,10 +36,13 @@ public class BrandCardClaimExecutor {
     public BrandCardClaimExecutionResult executeAutomatic(Long silkId, String xSivir, Long xVayne,
                                                             int maxAttempts, Duration minInterval,
                                                             Duration maxInterval) {
-        Instant target = LocalDate.now(clock)
-                .atTime(9, 30)
-                .atZone(ZONE_ID)
-                .toInstant();
+        Instant target = LocalDate.now(clock).atTime(9, 30).atZone(ZONE_ID).toInstant();
+        return executeAutomatic(silkId, xSivir, xVayne, maxAttempts, minInterval, maxInterval, target);
+    }
+
+    public BrandCardClaimExecutionResult executeAutomatic(Long silkId, String xSivir, Long xVayne,
+                                                            int maxAttempts, Duration minInterval,
+                                                            Duration maxInterval, Instant target) {
         waitUntil(target);
         Instant deadline = target.plus(EXECUTION_WINDOW);
         BrandCardClaimAttemptResult lastAttempt = null;

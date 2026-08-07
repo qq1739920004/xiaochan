@@ -5,6 +5,7 @@ import lombok.Data;
 
 @Data
 public class BrandCardClaimConfigVO {
+    private Integer accountId;
     private Long silkId;
     @JsonProperty("xVayne")
     private Long xVayne;

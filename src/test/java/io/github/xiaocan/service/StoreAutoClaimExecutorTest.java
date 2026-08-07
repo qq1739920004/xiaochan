@@ -42,6 +42,25 @@ class StoreAutoClaimExecutorTest {
         assertEquals(StoreAutoClaimStopReason.SOLD_OUT_OR_EXPIRED, result.stopReason());
     }
 
+    @Test
+    void oneShotExecutionDoesNotRetryTransportFailure() {
+        AtomicInteger calls = new AtomicInteger();
+        StoreAutoClaimExecutor executor = new StoreAutoClaimExecutor(
+                request -> {
+                    calls.incrementAndGet();
+                    return StoreAutoClaimAttempt.retryable("网络超时");
+                },
+                duration -> { },
+                () -> Duration.ofMillis(150)
+        );
+
+        var result = executor.executeOnce(request());
+
+        assertEquals(1, calls.get());
+        assertEquals(1, result.attempts());
+        assertEquals(StoreAutoClaimStopReason.REQUEST_FAILED, result.stopReason());
+    }
+
     private StoreAutoClaimRequest request() {
         return new StoreAutoClaimRequest(1L, "token", 310114, "121.4", "31.2", 99L, 1, null);
     }

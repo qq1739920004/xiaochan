@@ -51,7 +51,7 @@ class StoreAutoClaimServiceTest {
     }
 
     @Test
-    void preflightsRedpackAndPersistsSuccessfulOrder() {
+    void sendsOneClaimAndPersistsSuccessfulOrder() {
         BrandCardClaimConfigEntity credentials = new BrandCardClaimConfigEntity();
         credentials.setId(11);
         credentials.setUserId(8);
@@ -59,7 +59,6 @@ class StoreAutoClaimServiceTest {
         credentials.setXVayne(1836966L);
         credentials.setXSivir("token-value");
         when(brandCardClaimConfigMapper.selectOne(any(Wrapper.class))).thenReturn(credentials);
-        when(claimClient.findAvailableRedpackId(any())).thenReturn(123L);
         when(claimClient.claim(any())).thenReturn(
                 StoreAutoClaimAttempt.success(0, "抢单成功", 888L));
         StoreAutoClaimService service = new StoreAutoClaimServiceImpl(
@@ -71,8 +70,7 @@ class StoreAutoClaimServiceTest {
 
         assertEquals(888L, result.promotionOrderId());
         verify(claimClient).claim(ArgumentMatchers.argThat(request ->
-                Long.valueOf(123L).equals(request.redpackId())
-                        && Long.valueOf(456L).equals(request.promotionId())));
+                request.redpackId() == null && Long.valueOf(456L).equals(request.promotionId())));
         verify(historyMapper).insert(ArgumentMatchers.<StoreAutoClaimHistoryEntity>argThat(history ->
                 Long.valueOf(888L).equals(history.getPromotionOrderId()) && history.getSuccess()));
     }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Check, Clock, Refresh, Warning } from '@element-plus/icons-vue'
 import type { FormInstance } from 'element-plus'
@@ -20,12 +20,16 @@ const xSivirMasked = ref('')
 const history = ref<any[]>([])
 const pagination = reactive({ pageNum: 1, pageSize: 20, total: 0 })
 const lastResult = ref<any>(null)
+const accounts = ref<any[]>([])
+const selectedAccountId = ref<number | null>(null)
+const selectedAccount = computed(() => accounts.value.find(item => item.id === selectedAccountId.value))
 
 const form = reactive({
   silkId: null as number | null,
   xVayne: null as number | null,
   xSivir: '',
   enabled: false,
+  cron: '58 29 9 * * ?',
   maxAttempts: 12,
   minIntervalMs: 100,
   maxIntervalMs: 400,
@@ -42,11 +46,15 @@ const rules = {
 async function loadConfig() {
   loading.value = true
   try {
-    const response = await api.get('/api/brand-card/config')
+    const response = await api.get(selectedAccountId.value
+      ? `/api/brand-card/config/${selectedAccountId.value}`
+      : '/api/brand-card/config')
     const config = response.data.data
-    form.silkId = config.silkId ?? null
-    form.xVayne = config.xVayne ?? null
+    const account = accounts.value.find(item => item.id === selectedAccountId.value)
+    form.silkId = config.silkId ?? account?.silkId ?? null
+    form.xVayne = config.xVayne ?? account?.xVayne ?? null
     form.enabled = Boolean(config.enabled)
+    form.cron = config.cron || '58 29 9 * * ?'
     form.maxAttempts = config.maxAttempts ?? 12
     form.minIntervalMs = config.minIntervalMs ?? 100
     form.maxIntervalMs = config.maxIntervalMs ?? 400
@@ -56,10 +64,23 @@ async function loadConfig() {
   }
 }
 
+async function loadAccounts() {
+  const response = await api.get('/api/xiaochan/accounts', { refresh: false })
+  accounts.value = response.data.data || []
+  if (!selectedAccountId.value && accounts.value.length) selectedAccountId.value = accounts.value[0].id
+}
+
+async function changeAccount() {
+  await Promise.all([loadConfig(), loadHistory()])
+}
+
 async function loadHistory() {
   historyLoading.value = true
   try {
-    const response = await api.post('/api/brand-card/history/page', pagination)
+    const response = await api.post(
+      selectedAccountId.value ? `/api/brand-card/history/page/${selectedAccountId.value}` : '/api/brand-card/history/page',
+      pagination,
+    )
     const page = response.data.data
     history.value = page?.records || []
     pagination.total = Number(page?.total || 0)
@@ -80,11 +101,16 @@ async function saveConfig() {
   }
   saving.value = true
   try {
-    const payload = { ...form }
+    const payload: any = { ...form }
     if (!payload.xSivir.trim()) {
       delete (payload as Partial<typeof payload>).xSivir
     }
-    await api.post('/api/brand-card/config', payload)
+    if (selectedAccountId.value) {
+      payload.accountId = selectedAccountId.value
+      await api.post(`/api/brand-card/config/${selectedAccountId.value}`, payload)
+    } else {
+      await api.post('/api/brand-card/config', payload)
+    }
     form.xSivir = ''
     ElMessage.success('配置已保存')
     await loadConfig()
@@ -105,7 +131,8 @@ async function claimNow() {
   }
   claiming.value = true
   try {
-    const response = await api.post('/api/brand-card/claim-now')
+    const response = await api.post('/api/brand-card/claim-now', null,
+      selectedAccountId.value ? { params: { accountId: selectedAccountId.value } } : undefined)
     lastResult.value = response.data.data
     ElMessage.success('请求已完成')
     await loadHistory()
@@ -139,6 +166,7 @@ function statusText(item: any) {
 
 onMounted(async () => {
   await authState.waitForAuth()
+  await loadAccounts()
   await Promise.all([loadConfig(), loadHistory()])
 })
 </script>
@@ -161,10 +189,22 @@ onMounted(async () => {
         <div class="panel-header">
           <div>
             <h2>领取配置</h2>
-            <p>每日 09:30:00 开始请求；凭证同时供监控自动抢单使用</p>
+            <p>准备 cron 触发后 2 秒开始请求；凭证同时供监控自动抢单使用</p>
           </div>
           <el-switch v-model="form.enabled" inline-prompt active-text="开" inactive-text="关" />
         </div>
+
+        <el-form-item label="执行账号">
+          <el-select v-model="selectedAccountId" class="full-width" placeholder="请选择小蚕账号" @change="changeAccount">
+            <el-option v-for="account in accounts" :key="account.id" :label="`${account.accountName}（${account.nickname || account.silkId}）`" :value="account.id" />
+          </el-select>
+          <p class="field-note"><router-link to="/xiaochan-accounts">去账号配置</router-link> 添加或更新小蚕登录态。</p>
+          <div v-if="selectedAccount" class="account-summary">
+            <span>卡券 {{ selectedAccount.cardTotal ?? 0 }}（有效 {{ selectedAccount.cardActive ?? 0 }}）</span>
+            <span>红包 {{ selectedAccount.redpackTotal ?? 0 }}</span>
+            <span>{{ selectedAccount.refreshStatus === 'OK' ? '账号信息已同步' : '账号信息待刷新' }}</span>
+          </div>
+        </el-form-item>
 
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="claim-form">
           <el-form-item label="silk_id" prop="silkId">
@@ -182,14 +222,18 @@ onMounted(async () => {
 
           <div class="time-row">
             <div class="time-cell">
-              <span>每日执行时间</span>
-              <strong><el-icon><Clock /></el-icon> 09:30:00</strong>
+              <span>首次请求时间</span>
+              <strong><el-icon><Clock /></el-icon> cron + 2 秒</strong>
             </div>
             <div class="time-cell">
               <span>预备启动</span>
               <strong>09:29:58</strong>
             </div>
           </div>
+          <el-form-item label="准备 cron（含秒）">
+            <el-input v-model="form.cron" placeholder="58 29 9 * * ?" />
+            <p class="field-note">默认 09:29:58 准备，09:30:00 开始请求；每个账号可单独设置。</p>
+          </el-form-item>
 
           <div class="number-grid">
             <el-form-item label="最大请求次数" prop="maxAttempts">
@@ -214,7 +258,7 @@ onMounted(async () => {
         <div class="result-icon"><el-icon><Warning /></el-icon></div>
         <h2>执行规则</h2>
         <dl>
-          <div><dt>首次请求</dt><dd>09:30:00.000</dd></div>
+          <div><dt>首次请求</dt><dd>准备 cron + 2 秒</dd></div>
           <div><dt>随机间隔</dt><dd>{{ form.minIntervalMs }}-{{ form.maxIntervalMs }}ms</dd></div>
           <div><dt>最晚停止</dt><dd>09:30:03.000</dd></div>
         </dl>
@@ -269,6 +313,7 @@ h2 { font-size: 17px; margin-bottom: 0; letter-spacing: 0; }
 .claim-form :deep(.el-form-item__label) { color: #4c5b62; font-weight: 600; padding-bottom: 5px; }
 .full-width { width: 100%; }
 .field-note { color: #78848a; font-size: 12px; margin: 6px 0 0; }
+.account-summary { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 10px 0 16px; color: #5e6b71; font-size: 12px; }
 .time-row { border-top: 1px solid #edf0ef; border-bottom: 1px solid #edf0ef; display: grid; grid-template-columns: 1fr 1fr; margin: 6px 0 18px; }
 .time-cell { padding: 14px 0; display: grid; gap: 4px; }
 .time-cell + .time-cell { border-left: 1px solid #edf0ef; padding-left: 18px; }

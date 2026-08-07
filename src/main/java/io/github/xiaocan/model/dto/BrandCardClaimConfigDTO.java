@@ -4,11 +4,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Min;
 import lombok.Data;
 
 @Data
 public class BrandCardClaimConfigDTO {
+    private Integer accountId;
+    private String cron;
     @NotNull(message = "silk_id 不能为空")
     private Long silkId;
     @JsonProperty("xVayne")

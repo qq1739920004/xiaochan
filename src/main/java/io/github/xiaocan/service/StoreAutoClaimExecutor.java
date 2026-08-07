@@ -41,6 +41,21 @@ public class StoreAutoClaimExecutor {
                 lastAttempt == null ? null : lastAttempt.code(),
                 lastAttempt == null ? "未执行抢单请求" : lastAttempt.message(),
                 null,
+                StoreAutoClaimStopReason.REQUEST_FAILED
+        );
+    }
+
+    public StoreAutoClaimResult executeOnce(StoreAutoClaimRequest request) {
+        StoreAutoClaimAttempt attempt = client.claim(request);
+        if (!attempt.retryable()) {
+            return StoreAutoClaimResult.fromAttempt(1, attempt);
+        }
+        return new StoreAutoClaimResult(
+                1,
+                false,
+                attempt.code(),
+                attempt.message(),
+                null,
                 StoreAutoClaimStopReason.MAX_ATTEMPTS_REACHED
         );
     }

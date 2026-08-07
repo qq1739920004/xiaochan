@@ -9,20 +9,30 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("brand_card_claim_config")
-public class BrandCardClaimConfigEntity {
+@TableName("xiaochan_account")
+public class XiaochanAccountEntity {
     @TableId(type = IdType.AUTO)
     private Integer id;
     private Integer userId;
-    private Integer accountId;
+    private String accountName;
     private Long silkId;
     private Long xVayne;
     private String xSivir;
     private Boolean enabled;
-    private String cron;
-    private Integer maxAttempts;
-    private Integer minIntervalMs;
-    private Integer maxIntervalMs;
+    private Long upstreamUserId;
+    private String nickname;
+    private String phone;
+    private String vipLevel;
+    private Integer cardTotal;
+    private Integer cardActive;
+    private Integer cardExpired;
+    private Integer redpackTotal;
+    private Integer meituanRedpackTotal;
+    private Integer elemeRedpackTotal;
+    private Integer platformRedpackTotal;
+    private String refreshStatus;
+    private String lastRefreshError;
+    private LocalDateTime lastRefreshTime;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
     @TableLogic

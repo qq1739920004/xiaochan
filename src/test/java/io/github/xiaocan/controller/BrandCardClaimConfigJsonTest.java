@@ -3,6 +3,7 @@ package io.github.xiaocan.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.xiaocan.model.dto.BrandCardClaimConfigDTO;
 import io.github.xiaocan.model.vo.BrandCardClaimConfigVO;
+import io.github.xiaocan.model.vo.XiaochanAccountVO;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -26,5 +27,18 @@ class BrandCardClaimConfigJsonTest {
         assertEquals(1836966L, dto.getXVayne());
         assertTrue(json.contains("\"xSivirMasked\""));
         assertTrue(json.contains("\"xVayne\":1836966"));
+    }
+
+    @Test
+    void accountResponseNeverContainsFullSessionCredential() throws Exception {
+        XiaochanAccountVO vo = new XiaochanAccountVO();
+        vo.setAccountName("主账号");
+        vo.setSilkId(126938104L);
+        vo.setXSivirMasked("eyJhbG...WpE");
+
+        String json = objectMapper.writeValueAsString(vo);
+
+        assertTrue(json.contains("\"xSivirMasked\""));
+        org.junit.jupiter.api.Assertions.assertFalse(json.contains("xSivir\""));
     }
 }

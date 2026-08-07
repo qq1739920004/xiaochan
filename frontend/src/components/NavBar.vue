@@ -257,6 +257,9 @@ onMounted(() => {
       <router-link to="/brand-card-claim" class="nav-link" :class="{ active: currentPage === 'brand-card-claim' }">
         自动领取大牌卷
       </router-link>
+      <router-link to="/xiaochan-accounts" class="nav-link" :class="{ active: currentPage === 'xiaochan-accounts' }">
+        小蚕账号
+      </router-link>
     </div>
   </nav>
 

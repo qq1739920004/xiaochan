@@ -12,6 +12,7 @@ import io.github.xiaocan.model.StoreAutoClaimAttempt;
 import io.github.xiaocan.model.StoreAutoClaimRequest;
 import io.github.xiaocan.model.StoreAutoClaimStopReason;
 import io.github.xiaocan.model.StoreInfo;
+import io.github.xiaocan.model.XiaochanAccountSnapshot;
 import io.github.xiaocan.model.enums.StoreTypeEnum;
 import io.github.xiaocan.model.vo.AddressVO;
 import io.github.xiaocan.model.vo.XcMeituanshangjinPageVO;
@@ -265,6 +266,110 @@ public class XiaochanHttp {
         return availableItems.getJSONObject(0).getLong("user_red_pack_id");
     }
 
+    /**
+     * 查询账号概要和券数量。凭证只用于本次请求，不写入日志或返回对象。
+     */
+    public static XiaochanAccountSnapshot getAccountSnapshot(Long silkId, Long xVayne, String xSivir) {
+        JSONObject userInfoResponse = JSONObject.parseObject(postWithRes(
+                BASE_URL, JSONObject.toJSONString(Map.of("user_id", xVayne)), null,
+                "Silkworm", "SilkwormService.GetClientUserInfo", silkId, xSivir, xVayne));
+        ensureAccountResponseOk(userInfoResponse);
+        JSONObject userInfo = userInfoResponse.getJSONObject("user_info");
+
+        List<JSONObject> cards = new ArrayList<>();
+        int number = 100;
+        for (int offset = 0; offset < 1000; offset += number) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("silk_id", silkId);
+            body.put("status", 0);
+            body.put("offset", offset);
+            body.put("number", number);
+            body.put("card_types", List.of(8));
+            JSONObject response = JSONObject.parseObject(postWithRes(
+                    BASE_URL, JSONObject.toJSONString(body), null,
+                    "SilkwormCard", "SilkwormCardService.GetUserCardList", silkId, xSivir, xVayne));
+            ensureAccountResponseOk(response);
+            JSONArray page = response.getJSONArray("list");
+            if (page == null || page.isEmpty()) {
+                break;
+            }
+            for (int i = 0; i < page.size(); i++) {
+                cards.add(page.getJSONObject(i));
+            }
+            if (page.size() < number) {
+                break;
+            }
+        }
+
+        JSONObject redpacks = JSONObject.parseObject(postWithRes(
+                BASE_URL, JSONObject.toJSONString(Map.of("silk_id", silkId)), null,
+                "RedPack", "RedPackService.GetUserMaxRedPack", silkId, xSivir, xVayne));
+        ensureAccountResponseOk(redpacks);
+        int meituan = countValue(redpacks.get("meituan_red_pack"));
+        int eleme = countValue(redpacks.get("eleme_red_pack"));
+        int platform = countValue(redpacks.get("platform_red_packs"));
+
+        int regular = 0;
+        int percent = 0;
+        for (int businessType : List.of(1, 2)) {
+            JSONObject response = JSONObject.parseObject(postWithRes(
+                    BASE_URL, JSONObject.toJSONString(Map.of("silk_id", silkId, "business_type", businessType)), null,
+                    "RedPack", "RedPackService.GetUserMaxRedPackV2", silkId, xSivir, xVayne));
+            ensureAccountResponseOk(response);
+            regular += countValue(response.get("red_pack"));
+            percent += countValue(response.get("percent_red_pack"));
+        }
+
+        XiaochanAccountSnapshot snapshot = new XiaochanAccountSnapshot();
+        snapshot.setUpstreamUserId(userInfo == null ? null : userInfo.getLong("user_id"));
+        snapshot.setNickname(userInfo == null ? null : userInfo.getString("nickname"));
+        snapshot.setPhone(userInfo == null ? null : userInfo.getString("phone"));
+        JSONObject vip = userInfo == null ? null : userInfo.getJSONObject("now_vip_info");
+        snapshot.setVipLevel(vip == null ? null : vip.getString("name"));
+        snapshot.setCardTotal(cards.size());
+        int expired = (int) cards.stream().filter(XiaochanHttp::isExpiredCard).count();
+        snapshot.setCardExpired(expired);
+        snapshot.setCardActive(cards.size() - expired);
+        snapshot.setMeituanRedpackTotal(meituan);
+        snapshot.setElemeRedpackTotal(eleme);
+        snapshot.setPlatformRedpackTotal(platform);
+        snapshot.setRedpackTotal(meituan + eleme + platform + regular + percent);
+        return snapshot;
+    }
+
+    private static boolean isExpiredCard(JSONObject card) {
+        String expireTime = card.getString("expire_time");
+        if (expireTime == null) {
+            return false;
+        }
+        try {
+            long value = Long.parseLong(expireTime);
+            long millis = value < 100_000_000_000L ? value * 1000L : value;
+            return millis < System.currentTimeMillis();
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
+    }
+
+    private static int countValue(Object value) {
+        if (value == null) {
+            return 0;
+        }
+        if (value instanceof JSONArray array) {
+            return array.size();
+        }
+        return 1;
+    }
+
+    private static void ensureAccountResponseOk(JSONObject response) {
+        JSONObject status = response == null ? null : response.getJSONObject("status");
+        Integer code = status == null ? null : status.getInteger("code");
+        if (!Objects.equals(code, 0)) {
+            String msg = status == null ? "响应缺少 status" : status.getString("msg");
+            throw new BusinessException("账号查询失败:" + (msg == null ? code : msg));
+        }
+    }
+
     private static Long toCents(BigDecimal value) {
         return value == null ? 0L : value.movePointRight(2).longValue();
     }
@@ -408,18 +513,25 @@ public class XiaochanHttp {
 
     private static String postWithRes(String url, String body, Integer cityCode, String serverName,
                                       String methodName, Long silkId, String xSivir) {
+        return postWithRes(url, body, cityCode, serverName, methodName, silkId, xSivir, null);
+    }
+
+    private static String postWithRes(String url, String body, Integer cityCode, String serverName,
+                                      String methodName, Long silkId, String xSivir, Long xVayne) {
         Long timeMillis = System.currentTimeMillis();
-        String nami = getNami();
+        String nami = getNami(silkId);
         String ashe = getAshe(timeMillis, serverName, methodName, nami);
         Map<String, String> headers = getHeaders(timeMillis, ashe, cityCode, serverName, methodName, nami);
         headers.put("X-Sivir", xSivir);
         headers.put("x-Teemo", String.valueOf(silkId));
+        if (xVayne != null) {
+            headers.put("X-Vayne", String.valueOf(xVayne));
+        }
         headers.put("X-Session-Id", UUID.randomUUID().toString());
-        headers.put("X-Platform", "h5");
-        headers.put("X-Version", "3.19.0");
+        headers.put("X-Platform", "iOS");
+        headers.put("X-Version", "3.19.1.0");
         headers.put("x-CityCode", String.valueOf(cityCode));
-        headers.put("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) "
-                + "AppleWebKit/605.1.15 (KHTML, like Gecko) xcapp;3.19.0;iOS");
+        headers.put("User-Agent", "XC;iOS;3.19.1");
         HttpResponse response = HttpUtil.createPost(url)
                 .headerMap(headers, true)
                 .timeout(1500)

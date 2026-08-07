@@ -35,7 +35,7 @@ public class XiaoChanServiceImpl implements XiaoChanService {
     /**
      * 门店最长距离
      */
-    private static final int MAX_DISTANCE = 3500;
+    private static final int MAX_DISTANCE = 5000;
 
     @Resource
     private StoreInventoryHistoryService storeInventoryHistoryService;
@@ -67,7 +67,9 @@ public class XiaoChanServiceImpl implements XiaoChanService {
                 result = getListByOffset(queryListVO.getCityCode(), queryListVO.getLongitude(), queryListVO.getLatitude(), queryListVO.getPageSize() * pageNum);
             }
         }
-        return result;
+        return result.stream()
+                .filter(this::withinDistanceLimit)
+                .toList();
     }
 
     @Override
@@ -124,6 +126,15 @@ public class XiaoChanServiceImpl implements XiaoChanService {
         //有一半的店距离超过MAX_DISTANCE，则不再查找下一页
         return overDistanceCount <= (size / 2);
 
+    }
+
+    private boolean withinDistanceLimit(StoreInfo store) {
+        if (store == null || StringUtils.isBlank(store.getDistance())) return false;
+        try {
+            return Long.parseLong(store.getDistance()) <= MAX_DISTANCE;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
 

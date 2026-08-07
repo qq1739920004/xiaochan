@@ -42,6 +42,7 @@ const autoClaimHistoryLoading = ref(false)
 const autoClaimHistoryList = ref<any[]>([])
 const autoClaimHistoryName = ref('')
 const xiaocanCredentialConfigured = ref(false)
+const xiaocanAccounts = ref<any[]>([])
 
 // 对话框相关
 const dialogVisible = ref(false)
@@ -71,6 +72,7 @@ const form = reactive({
   remindFrequency: 'ONCE',
   autoClaimConfig: {
     enabled: false,
+    accountId: null as number | null,
     maxAttempts: 5,
     minIntervalMs: 150,
     maxIntervalMs: 350,
@@ -269,9 +271,9 @@ async function loadLocations() {
 
 async function loadXiaocanCredentialStatus() {
   try {
-    const response = await api.get('/api/brand-card/config')
-    const config = response.data.data
-    xiaocanCredentialConfigured.value = Boolean(config?.silkId && config?.xVayne && config?.xSivirMasked)
+    const response = await api.get('/api/xiaochan/accounts', { refresh: false })
+    xiaocanAccounts.value = response.data.data || []
+    xiaocanCredentialConfigured.value = xiaocanAccounts.value.some(account => account.enabled && account.silkId && account.xVayne && account.xSivirMasked)
   } catch {
     xiaocanCredentialConfigured.value = false
   }
@@ -287,6 +289,7 @@ function resetForm() {
   form.remindFrequency = 'ONCE'
   form.autoClaimConfig = {
     enabled: false,
+    accountId: null,
     maxAttempts: 5,
     minIntervalMs: 150,
     maxIntervalMs: 350,
@@ -319,6 +322,7 @@ function showEditDialog(config: any) {
   form.remindFrequency = config.storeExtNotifyConfig?.remindFrequency || 'ONCE'
   form.autoClaimConfig = {
     enabled: Boolean(config.storeExtNotifyConfig?.autoClaimConfig?.enabled),
+    accountId: config.storeExtNotifyConfig?.autoClaimConfig?.accountId ?? null,
     maxAttempts: config.storeExtNotifyConfig?.autoClaimConfig?.maxAttempts ?? 5,
     minIntervalMs: config.storeExtNotifyConfig?.autoClaimConfig?.minIntervalMs ?? 150,
     maxIntervalMs: config.storeExtNotifyConfig?.autoClaimConfig?.maxIntervalMs ?? 350,
@@ -332,6 +336,7 @@ function showEditDialog(config: any) {
     form.storeKeywordExtNotifyConfig.limitDistance = config.storeKeywordExtNotifyConfig.limitDistance !== false
     form.autoClaimConfig = {
       enabled: Boolean(config.storeKeywordExtNotifyConfig.autoClaimConfig?.enabled),
+      accountId: config.storeKeywordExtNotifyConfig.autoClaimConfig?.accountId ?? null,
       maxAttempts: config.storeKeywordExtNotifyConfig.autoClaimConfig?.maxAttempts ?? 5,
       minIntervalMs: config.storeKeywordExtNotifyConfig.autoClaimConfig?.minIntervalMs ?? 150,
       maxIntervalMs: config.storeKeywordExtNotifyConfig.autoClaimConfig?.maxIntervalMs ?? 350,
@@ -509,6 +514,7 @@ function getAutoClaimStopText(reason: string) {
     AUTH_INVALID: '登录态失效',
     NEED_VERIFY: '需要验证',
     MISSING_CREDENTIALS: '未配置凭证',
+    REQUEST_FAILED: '请求失败（仅请求 1 次）',
     BUSINESS_FAILURE: '业务失败',
     MAX_ATTEMPTS_REACHED: '达到次数上限',
   }
@@ -664,7 +670,7 @@ onUnmounted(() => {
                 v-if="config.type === 'STORE_KEYWORD' && config.storeKeywordExtNotifyConfig"
                 class="info-item"
               >
-                <span>限距离制：{{ config.storeKeywordExtNotifyConfig.limitDistance !== false ? '开启（≤3500米）' : '关闭' }}</span>
+                <span>限距离制：{{ config.storeKeywordExtNotifyConfig.limitDistance !== false ? '开启（≤5000米）' : '关闭' }}</span>
               </p>
               <p
                 v-if="config.type === 'STORE_KEYWORD' && config.storeKeywordExtNotifyConfig"
@@ -857,7 +863,7 @@ onUnmounted(() => {
             </div>
             <div class="detail-item">
               <label>限距离制：</label>
-              <span>{{ currentDetail.storeKeywordExtNotifyConfig.limitDistance !== false ? '开启（≤3500米）' : '关闭' }}</span>
+              <span>{{ currentDetail.storeKeywordExtNotifyConfig.limitDistance !== false ? '开启（≤5000米）' : '关闭' }}</span>
             </div>
             <div class="detail-item">
               <label>自动抢单：</label>
@@ -872,7 +878,7 @@ onUnmounted(() => {
     <el-dialog
       :title="isEdit ? '编辑监控配置' : '新增监控配置'"
       v-model="dialogVisible"
-      width="500px"
+      width="1120px"
       class="monitor-dialog"
       @close="resetForm"
       :close-on-click-modal="false"
@@ -984,27 +990,23 @@ onUnmounted(() => {
             <span :class="xiaocanCredentialConfigured ? 'credential-ok' : 'credential-missing'">
               小蚕登录态：{{ xiaocanCredentialConfigured ? '已配置' : '未配置' }}
             </span>
-            <el-button link type="primary" @click="router.push('/brand-card-claim')">
-              去配置 silk_id / X-Sivir
+            <el-button link type="primary" @click="router.push('/xiaochan-accounts')">
+              去配置小蚕账号
             </el-button>
           </div>
-          <el-row v-if="form.autoClaimConfig.enabled" :gutter="16">
-            <el-col :span="8">
-              <el-form-item label="最大次数">
-                <el-input-number v-model="form.autoClaimConfig.maxAttempts" :min="1" :max="30" controls-position="right" style="width: 100%" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="最小间隔(ms)">
-                <el-input-number v-model="form.autoClaimConfig.minIntervalMs" :min="100" :max="400" controls-position="right" style="width: 100%" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="最大间隔(ms)">
-                <el-input-number v-model="form.autoClaimConfig.maxIntervalMs" :min="100" :max="400" controls-position="right" style="width: 100%" />
-              </el-form-item>
-            </el-col>
-          </el-row>
+          <div v-if="form.autoClaimConfig.enabled" class="auto-claim-settings">
+            <el-form-item label="使用小蚕账号">
+              <el-select v-model="form.autoClaimConfig.accountId" placeholder="请选择账号" style="width: 100%">
+                <el-option
+                  v-for="account in xiaocanAccounts.filter(item => item.enabled)"
+                  :key="account.id"
+                  :label="`${account.accountName}（${account.nickname || account.silkId}）`"
+                  :value="account.id"
+                />
+              </el-select>
+            </el-form-item>
+            <div class="one-shot-hint"><strong>固定请求 1 次</strong><span>活动提前出现时，到开始时间复查库存后只发送一次抢单请求，成功或失败都不重试。</span></div>
+          </div>
         </template>
 
         <!-- 最小实付金额：新增且类型为 MINIMUM_PAY 时显示，编辑时仅 MINIMUM_PAY 类型显示 -->
@@ -1035,7 +1037,7 @@ onUnmounted(() => {
           </el-form-item>
           <el-form-item label="限距离制">
             <el-checkbox v-model="form.storeKeywordExtNotifyConfig.limitDistance">
-              开启后仅推送距离 3500 米以内的门店
+              开启后仅推送距离 5000 米以内的门店
             </el-checkbox>
           </el-form-item>
         </template>
@@ -1559,6 +1561,8 @@ onUnmounted(() => {
 // 对话框移动端适配（需要穿透 scoped）
 .monitor-dialog {
   :deep(.el-dialog) {
+    width: min(1120px, calc(100vw - 32px)) !important;
+    max-width: calc(100vw - 32px);
     @media screen and (max-width: 768px) {
       width: 92% !important;
       margin: 16px auto !important;
@@ -1626,6 +1630,29 @@ onUnmounted(() => {
     }
   }
 }
+
+.auto-claim-settings {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: end;
+}
+
+.one-shot-hint {
+  min-height: 40px;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid #d9ecff;
+  border-radius: 6px;
+  background: #f4f9ff;
+  color: #55718a;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.one-shot-hint strong { color: #1677ff; white-space: nowrap; }
 
 // 运行记录对话框适配
 .history-dialog {
@@ -1727,6 +1754,7 @@ onUnmounted(() => {
 }
 
 @media screen and (max-width: 768px) {
+  .auto-claim-settings { grid-template-columns: 1fr; gap: 0; }
   .history-table-wrapper {
     display: none;
   }

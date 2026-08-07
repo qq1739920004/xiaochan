@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.github.xiaocan.mapper.BrandCardClaimConfigMapper;
 import io.github.xiaocan.mapper.StoreAutoClaimHistoryMapper;
+import io.github.xiaocan.mapper.XiaochanAccountMapper;
 import io.github.xiaocan.model.StoreAutoClaimAttempt;
 import io.github.xiaocan.model.StoreAutoClaimConfig;
 import io.github.xiaocan.model.StoreAutoClaimRequest;
@@ -18,6 +19,7 @@ import io.github.xiaocan.model.entity.LocationEntity;
 import io.github.xiaocan.model.entity.MonitorConfigEntity;
 import io.github.xiaocan.model.entity.StoreAutoClaimHistoryEntity;
 import io.github.xiaocan.model.entity.UserEntity;
+import io.github.xiaocan.model.entity.XiaochanAccountEntity;
 import io.github.xiaocan.model.vo.StoreAutoClaimHistoryVO;
 import io.github.xiaocan.service.StoreAutoClaimClient;
 import io.github.xiaocan.service.StoreAutoClaimExecutor;
@@ -30,20 +32,19 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.concurrent.ThreadLocalRandom;
+import java.time.ZoneId;
 
 @Service
 @Slf4j
 public class StoreAutoClaimServiceImpl implements StoreAutoClaimService {
-    private static final int DEFAULT_MAX_ATTEMPTS = 5;
-    private static final int DEFAULT_MIN_INTERVAL_MS = 150;
-    private static final int DEFAULT_MAX_INTERVAL_MS = 350;
-
+    private static final ZoneId APP_ZONE = ZoneId.of("Asia/Shanghai");
     private final BrandCardClaimConfigMapper brandCardClaimConfigMapper;
     private final StoreAutoClaimHistoryMapper historyMapper;
     private final StoreAutoClaimClient claimClient;
+
+    @Resource
+    private XiaochanAccountMapper accountMapper;
 
     @Resource
     private UserService userService;
@@ -59,8 +60,8 @@ public class StoreAutoClaimServiceImpl implements StoreAutoClaimService {
     @Override
     public StoreAutoClaimResult execute(MonitorConfigEntity monitorConfig,
                                         LocationEntity location, StoreInfo candidate) {
-        LocalDateTime startTime = LocalDateTime.now();
-        BrandCardClaimConfigEntity credentials = findCredentials(monitorConfig.getUserId());
+        LocalDateTime startTime = LocalDateTime.now(APP_ZONE);
+        BrandCardClaimConfigEntity credentials = findCredentials(monitorConfig);
         if (credentials == null || credentials.getSilkId() == null || credentials.getXVayne() == null
                 || !StringUtils.hasText(credentials.getXSivir())) {
             StoreAutoClaimResult result = new StoreAutoClaimResult(
@@ -70,37 +71,9 @@ public class StoreAutoClaimServiceImpl implements StoreAutoClaimService {
             return result;
         }
 
-        StoreExtNotifyConfig ext = JSON.parseObject(monitorConfig.getExtConfig(), StoreExtNotifyConfig.class);
-        StoreAutoClaimConfig autoConfig = ext == null || ext.getAutoClaimConfig() == null
-                ? new StoreAutoClaimConfig() : ext.getAutoClaimConfig();
         StoreAutoClaimRequest request = buildRequest(credentials, location, candidate, null);
-        Long redpackId = null;
-        try {
-            redpackId = claimClient.findAvailableRedpackId(request);
-        } catch (Exception e) {
-            // 红包是可选增强字段，预取失败不能阻断主抢单流程。
-            log.warn("预取红包失败，继续尝试主抢单 configId={}, promotionId={}",
-                    monitorConfig.getId(), candidate.getPromotionId(), e);
-        }
-        request = buildRequest(credentials, location, candidate, redpackId);
-
-        int maxAttempts = positiveOrDefault(autoConfig.getMaxAttempts(), DEFAULT_MAX_ATTEMPTS);
-        int minInterval = clampInterval(autoConfig.getMinIntervalMs(), DEFAULT_MIN_INTERVAL_MS);
-        int maxInterval = clampInterval(autoConfig.getMaxIntervalMs(), DEFAULT_MAX_INTERVAL_MS);
-        if (minInterval > maxInterval) {
-            minInterval = DEFAULT_MIN_INTERVAL_MS;
-            maxInterval = DEFAULT_MAX_INTERVAL_MS;
-        }
-        int finalMinInterval = minInterval;
-        int finalMaxInterval = maxInterval;
-        StoreAutoClaimExecutor executor = new StoreAutoClaimExecutor(
-                claimClient,
-                duration -> Thread.sleep(duration.toMillis()),
-                () -> Duration.ofMillis(ThreadLocalRandom.current().nextLong(
-                        finalMinInterval, finalMaxInterval + 1L))
-        );
-        StoreAutoClaimResult result = executor.execute(request, maxAttempts,
-                Duration.ofMillis(finalMinInterval), Duration.ofMillis(finalMaxInterval));
+        StoreAutoClaimExecutor executor = new StoreAutoClaimExecutor(claimClient, duration -> { }, () -> java.time.Duration.ZERO);
+        StoreAutoClaimResult result = executor.executeOnce(request);
         saveHistory(monitorConfig, credentials, candidate, startTime, result);
         return result;
     }
@@ -119,9 +92,44 @@ public class StoreAutoClaimServiceImpl implements StoreAutoClaimService {
         return PageConvertUtil.convert(page, StoreAutoClaimHistoryVO.class);
     }
 
-    private BrandCardClaimConfigEntity findCredentials(Integer userId) {
+    private BrandCardClaimConfigEntity findCredentials(MonitorConfigEntity monitorConfig) {
+        Integer userId = monitorConfig.getUserId();
+        Integer accountId = readAccountId(monitorConfig);
+        if (accountMapper != null) {
+            LambdaQueryWrapper<XiaochanAccountEntity> wrapper = new LambdaQueryWrapper<XiaochanAccountEntity>()
+                    .eq(XiaochanAccountEntity::getUserId, userId)
+                    .eq(XiaochanAccountEntity::getEnabled, true);
+            if (accountId != null) {
+                wrapper.eq(XiaochanAccountEntity::getId, accountId);
+            }
+            XiaochanAccountEntity account = accountMapper.selectOne(wrapper.orderByAsc(XiaochanAccountEntity::getId));
+            if (account != null) {
+                return toCredentials(account);
+            }
+            if (accountId != null) {
+                return null;
+            }
+        }
         return brandCardClaimConfigMapper.selectOne(new LambdaQueryWrapper<BrandCardClaimConfigEntity>()
                 .eq(BrandCardClaimConfigEntity::getUserId, userId));
+    }
+
+    private Integer readAccountId(MonitorConfigEntity monitorConfig) {
+        if (monitorConfig.getExtConfig() == null) return null;
+        com.alibaba.fastjson2.JSONObject root = JSON.parseObject(monitorConfig.getExtConfig());
+        com.alibaba.fastjson2.JSONObject auto = root == null ? null : root.getJSONObject("autoClaimConfig");
+        return auto == null ? null : auto.getInteger("accountId");
+    }
+
+    private BrandCardClaimConfigEntity toCredentials(XiaochanAccountEntity account) {
+        BrandCardClaimConfigEntity credentials = new BrandCardClaimConfigEntity();
+        credentials.setId(account.getId());
+        credentials.setUserId(account.getUserId());
+        credentials.setAccountId(account.getId());
+        credentials.setSilkId(account.getSilkId());
+        credentials.setXVayne(account.getXVayne());
+        credentials.setXSivir(account.getXSivir());
+        return credentials;
     }
 
     private StoreAutoClaimRequest buildRequest(BrandCardClaimConfigEntity credentials,
@@ -149,6 +157,7 @@ public class StoreAutoClaimServiceImpl implements StoreAutoClaimService {
         history.setUserId(monitorConfig.getUserId());
         history.setMonitorConfigId(monitorConfig.getId());
         history.setBrandConfigId(credentials == null ? null : credentials.getId());
+        history.setAccountId(credentials == null ? null : credentials.getAccountId());
         history.setStoreId(candidate.getStoreId());
         history.setStoreName(candidate.getName());
         history.setPromotionId(parseLong(candidate.getPromotionId()));
@@ -158,7 +167,7 @@ public class StoreAutoClaimServiceImpl implements StoreAutoClaimService {
         history.setActivityStartTime(candidate.getStartTime());
         history.setActivityEndTime(candidate.getEndTime());
         history.setStartTime(startTime);
-        history.setEndTime(LocalDateTime.now());
+        history.setEndTime(LocalDateTime.now(APP_ZONE));
         history.setRequestCount(result.attempts());
         history.setSuccess(result.success());
         history.setPromotionOrderId(result.promotionOrderId());
@@ -176,11 +185,4 @@ public class StoreAutoClaimServiceImpl implements StoreAutoClaimService {
         }
     }
 
-    private int positiveOrDefault(Integer value, int fallback) {
-        return value == null || value < 1 ? fallback : Math.min(value, 30);
-    }
-
-    private int clampInterval(Integer value, int fallback) {
-        return value == null ? fallback : Math.max(100, Math.min(value, 400));
-    }
 }

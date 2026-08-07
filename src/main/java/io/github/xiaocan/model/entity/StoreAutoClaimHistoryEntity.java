@@ -16,6 +16,7 @@ public class StoreAutoClaimHistoryEntity {
     private Integer userId;
     private Integer monitorConfigId;
     private Integer brandConfigId;
+    private Integer accountId;
     private Integer storeId;
     private String storeName;
     private Long promotionId;
