@@ -62,14 +62,15 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         BrandCardClaimConfigEntity config = findByUserId(user.getId());
         boolean creating = config == null;
         if (creating) {
-            if (!StringUtils.hasText(dto.getXSivir())) {
-                throw new BusinessException("首次保存必须填写 X-Sivir");
+            if (!StringUtils.hasText(dto.getXSivir()) || dto.getXVayne() == null) {
+                throw new BusinessException("首次保存必须填写 X-Sivir 与 X-Vayne");
             }
             config = new BrandCardClaimConfigEntity();
             config.setUserId(user.getId());
             config.setCron(DEFAULT_CRON);
         }
         config.setSilkId(dto.getSilkId());
+        config.setXVayne(dto.getXVayne());
         config.setEnabled(dto.getEnabled());
         config.setMaxAttempts(dto.getMaxAttempts());
         config.setMinIntervalMs(dto.getMinIntervalMs());
@@ -88,7 +89,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     public BrandCardClaimExecutionResult claimNow() {
         BrandCardClaimConfigEntity config = requireCurrentUserConfig();
         LocalDateTime startTime = LocalDateTime.now();
-        BrandCardClaimAttemptResult attempt = XiaochanHttp.grabExtraBrandCard(config.getSilkId(), config.getXSivir());
+        BrandCardClaimAttemptResult attempt = XiaochanHttp.grabExtraBrandCard(
+                config.getSilkId(), config.getXSivir(), config.getXVayne());
         BrandCardClaimExecutionResult result = attempt.retryable()
                 ? new BrandCardClaimExecutionResult(1, false, attempt.code(), attempt.message(), BrandCardClaimStopReason.TIME_WINDOW_EXPIRED)
                 : BrandCardClaimExecutionResult.fromAttempt(1, attempt);
@@ -111,13 +113,16 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     public void runScheduledClaims() {
         list(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<BrandCardClaimConfigEntity>()
                 .eq(BrandCardClaimConfigEntity::getEnabled, true))
+                .stream()
+                .filter(config -> config.getSilkId() != null && config.getXVayne() != null
+                        && StringUtils.hasText(config.getXSivir()))
                 .forEach(config -> taskScheduler.execute(() -> runAutomaticClaim(config)));
     }
 
     private void runAutomaticClaim(BrandCardClaimConfigEntity config) {
         LocalDateTime startTime = LocalDateTime.now();
         BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
-                XiaochanHttp::grabExtraBrandCard,
+                (silkId, xSivir) -> XiaochanHttp.grabExtraBrandCard(silkId, xSivir, config.getXVayne()),
                 Clock.systemDefaultZone(),
                 duration -> Thread.sleep(duration.toMillis()),
                 () -> Duration.ofMillis(ThreadLocalRandom.current().nextLong(
@@ -126,6 +131,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         BrandCardClaimExecutionResult result = executor.executeAutomatic(
                 config.getSilkId(),
                 config.getXSivir(),
+                config.getXVayne(),
                 config.getMaxAttempts(),
                 Duration.ofMillis(config.getMinIntervalMs()),
                 Duration.ofMillis(config.getMaxIntervalMs())
@@ -137,8 +143,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
 
     private BrandCardClaimConfigEntity requireCurrentUserConfig() {
         BrandCardClaimConfigEntity config = findByUserId(userService.getByCurrentRequest().getId());
-        if (config == null || !StringUtils.hasText(config.getXSivir())) {
-            throw new BusinessException("请先保存 silk_id 与 X-Sivir 配置");
+        if (config == null || config.getXVayne() == null || !StringUtils.hasText(config.getXSivir())) {
+            throw new BusinessException("请先保存 silk_id、X-Vayne 与 X-Sivir 配置");
         }
         return config;
     }
@@ -158,6 +164,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
             return vo;
         }
         vo.setSilkId(config.getSilkId());
+        vo.setXVayne(config.getXVayne());
         vo.setXSivirMasked(mask(config.getXSivir()));
         vo.setEnabled(config.getEnabled());
         vo.setCron(config.getCron());

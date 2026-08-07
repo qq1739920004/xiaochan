@@ -15,6 +15,7 @@ public class BrandCardClaimConfigEntity {
     private Integer id;
     private Integer userId;
     private Long silkId;
+    private Long xVayne;
     private String xSivir;
     private Boolean enabled;
     private String cron;

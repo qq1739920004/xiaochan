@@ -271,7 +271,7 @@ async function loadXiaocanCredentialStatus() {
   try {
     const response = await api.get('/api/brand-card/config')
     const config = response.data.data
-    xiaocanCredentialConfigured.value = Boolean(config?.silkId && config?.xSivirMasked)
+    xiaocanCredentialConfigured.value = Boolean(config?.silkId && config?.xVayne && config?.xSivirMasked)
   } catch {
     xiaocanCredentialConfigured.value = false
   }

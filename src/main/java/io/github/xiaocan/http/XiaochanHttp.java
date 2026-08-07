@@ -48,8 +48,13 @@ public class XiaochanHttp {
     }
 
     public static BrandCardRequestParts buildBrandCardClaimRequestParts(Long silkId, String xSivir) {
+        return buildBrandCardClaimRequestParts(silkId, xSivir, null);
+    }
+
+    public static BrandCardRequestParts buildBrandCardClaimRequestParts(Long silkId, String xSivir,
+                                                                          Long xVayne) {
         long timeMillis = System.currentTimeMillis();
-        String nami = getNami();
+        String nami = getNami(silkId);
         String ashe = getAshe(timeMillis, BRAND_CARD_SERVER_NAME, BRAND_CARD_METHOD_NAME, nami);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("type", 99);
@@ -62,9 +67,13 @@ public class XiaochanHttp {
         headers.put("X-Nami", nami);
         headers.put("X-Ashe", ashe);
         headers.put("X-Sivir", xSivir);
+        if (xVayne != null) {
+            headers.put("X-Vayne", String.valueOf(xVayne));
+        }
         headers.put("x-Teemo", String.valueOf(silkId));
         headers.put("X-Platform", "iOS");
-        headers.put("User-Agent", "XC;iOS;3.19.0");
+        headers.put("X-Version", "3.19.1.0");
+        headers.put("User-Agent", "XC;iOS;3.19.1");
         headers.put("X-Session-Id", UUID.randomUUID().toString());
         headers.put("x-Annie", "XC");
         headers.put("Accept", "*/*");
@@ -73,7 +82,11 @@ public class XiaochanHttp {
     }
 
     public static BrandCardClaimAttemptResult grabExtraBrandCard(Long silkId, String xSivir) {
-        BrandCardRequestParts request = buildBrandCardClaimRequestParts(silkId, xSivir);
+        return grabExtraBrandCard(silkId, xSivir, null);
+    }
+
+    public static BrandCardClaimAttemptResult grabExtraBrandCard(Long silkId, String xSivir, Long xVayne) {
+        BrandCardRequestParts request = buildBrandCardClaimRequestParts(silkId, xSivir, xVayne);
         HttpResponse response = null;
         try {
             response = HttpUtil.createPost(BASE_URL)
@@ -122,7 +135,7 @@ public class XiaochanHttp {
 
     public static StoreAutoClaimRequestParts buildStoreAutoClaimRequest(StoreAutoClaimRequest request) {
         long timeMillis = System.currentTimeMillis();
-        String nami = getNami();
+        String nami = getNami(request.silkId());
         String ashe = getAshe(timeMillis, STORE_CLAIM_SERVER_NAME, STORE_CLAIM_METHOD_NAME, nami);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("city_code", request.cityCode());
@@ -144,15 +157,17 @@ public class XiaochanHttp {
         headers.put("X-Nami", nami);
         headers.put("X-Ashe", ashe);
         headers.put("X-Sivir", request.xSivir());
+        if (request.xVayne() != null) {
+            headers.put("X-Vayne", String.valueOf(request.xVayne()));
+        }
         headers.put("x-Teemo", String.valueOf(request.silkId()));
-        headers.put("X-Platform", "h5");
-        headers.put("X-Version", "3.19.0");
+        headers.put("X-Platform", "iOS");
+        headers.put("X-Version", "3.19.1.0");
         headers.put("X-Session-Id", UUID.randomUUID().toString());
         headers.put("x-Annie", "XC");
         headers.put("x-City", String.valueOf(request.cityCode()));
         headers.put("x-CityCode", String.valueOf(request.cityCode()));
-        headers.put("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) "
-                + "AppleWebKit/605.1.15 (KHTML, like Gecko) xcapp;3.19.0;iOS");
+        headers.put("User-Agent", "XC;iOS;3.19.1");
         headers.put("Accept", "application/json, text/plain, */*");
         headers.put("Content-Type", "application/json");
         return new StoreAutoClaimRequestParts(JSONObject.toJSONString(body), headers);
@@ -489,11 +504,22 @@ public class XiaochanHttp {
     }
 
 
-    private static String getNami(){
-        String uuid = generateUuid();
-        uuid = uuid.replace("-", "");
+    private static String getNami() {
+        String uuid = generateUuid().replace("-", "");
         String silkId = "0";
         return uuid.substring(0, 4) + silkId + uuid.substring(4, 20 - silkId.length() - 4);
+    }
+
+    static String getNami(Long silkId) {
+        String alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        Random random = new Random();
+        StringBuilder randomPart = new StringBuilder(16);
+        for (int i = 0; i < 16; i++) {
+            randomPart.append(alphabet.charAt(random.nextInt(alphabet.length())));
+        }
+        int insertAt = random.nextInt(17);
+        String value = silkId == null ? "0" : String.valueOf(silkId);
+        return randomPart.substring(0, insertAt) + value + randomPart.substring(insertAt);
     }
 
     private static String getBody(Integer cityCode, String longitude, String latitude, int offset, int promotionCategory, int storeCategory) {

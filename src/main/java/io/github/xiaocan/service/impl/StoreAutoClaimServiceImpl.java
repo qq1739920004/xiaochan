@@ -61,10 +61,10 @@ public class StoreAutoClaimServiceImpl implements StoreAutoClaimService {
                                         LocationEntity location, StoreInfo candidate) {
         LocalDateTime startTime = LocalDateTime.now();
         BrandCardClaimConfigEntity credentials = findCredentials(monitorConfig.getUserId());
-        if (credentials == null || credentials.getSilkId() == null
+        if (credentials == null || credentials.getSilkId() == null || credentials.getXVayne() == null
                 || !StringUtils.hasText(credentials.getXSivir())) {
             StoreAutoClaimResult result = new StoreAutoClaimResult(
-                    0, false, null, "请先配置有效的 silk_id 与 X-Sivir", null,
+                    0, false, null, "请先配置有效的 silk_id、X-Vayne 与 X-Sivir", null,
                     StoreAutoClaimStopReason.MISSING_CREDENTIALS);
             saveHistory(monitorConfig, credentials, candidate, startTime, result);
             return result;
@@ -130,6 +130,7 @@ public class StoreAutoClaimServiceImpl implements StoreAutoClaimService {
         return new StoreAutoClaimRequest(
                 credentials.getSilkId(),
                 credentials.getXSivir(),
+                credentials.getXVayne(),
                 location.getCityCode(),
                 location.getLongitude(),
                 location.getLatitude(),

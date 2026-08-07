@@ -6,6 +6,8 @@ import lombok.Data;
 @Data
 public class BrandCardClaimConfigVO {
     private Long silkId;
+    @JsonProperty("xVayne")
+    private Long xVayne;
     @JsonProperty("xSivirMasked")
     private String xSivirMasked;
     private Boolean enabled;

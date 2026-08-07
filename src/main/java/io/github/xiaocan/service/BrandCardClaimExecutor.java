@@ -30,6 +30,12 @@ public class BrandCardClaimExecutor {
 
     public BrandCardClaimExecutionResult executeAutomatic(Long silkId, String xSivir, int maxAttempts,
                                                             Duration minInterval, Duration maxInterval) {
+        return executeAutomatic(silkId, xSivir, null, maxAttempts, minInterval, maxInterval);
+    }
+
+    public BrandCardClaimExecutionResult executeAutomatic(Long silkId, String xSivir, Long xVayne,
+                                                            int maxAttempts, Duration minInterval,
+                                                            Duration maxInterval) {
         Instant target = LocalDate.now(clock)
                 .atTime(9, 30)
                 .atZone(ZONE_ID)
@@ -41,7 +47,7 @@ public class BrandCardClaimExecutor {
 
         while (attempts < maxAttempts && !clock.instant().isAfter(deadline)) {
             attempts++;
-            lastAttempt = client.claim(silkId, xSivir);
+            lastAttempt = client.claim(silkId, xSivir, xVayne);
             if (!lastAttempt.retryable()) {
                 return BrandCardClaimExecutionResult.fromAttempt(attempts, lastAttempt);
             }

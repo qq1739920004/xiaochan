@@ -56,6 +56,7 @@ class StoreAutoClaimServiceTest {
         credentials.setId(11);
         credentials.setUserId(8);
         credentials.setSilkId(126938104L);
+        credentials.setXVayne(1836966L);
         credentials.setXSivir("token-value");
         when(brandCardClaimConfigMapper.selectOne(any(Wrapper.class))).thenReturn(credentials);
         when(claimClient.findAvailableRedpackId(any())).thenReturn(123L);

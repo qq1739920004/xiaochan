@@ -23,6 +23,7 @@ const lastResult = ref<any>(null)
 
 const form = reactive({
   silkId: null as number | null,
+  xVayne: null as number | null,
   xSivir: '',
   enabled: false,
   maxAttempts: 12,
@@ -32,6 +33,7 @@ const form = reactive({
 
 const rules = {
   silkId: [{ required: true, message: '请输入 silk_id', trigger: 'blur' }],
+  xVayne: [{ required: true, message: '请输入 X-Vayne', trigger: 'blur' }],
   maxAttempts: [{ required: true, message: '请输入最大请求次数', trigger: 'blur' }],
   minIntervalMs: [{ required: true, message: '请输入最小间隔', trigger: 'blur' }],
   maxIntervalMs: [{ required: true, message: '请输入最大间隔', trigger: 'blur' }],
@@ -43,6 +45,7 @@ async function loadConfig() {
     const response = await api.get('/api/brand-card/config')
     const config = response.data.data
     form.silkId = config.silkId ?? null
+    form.xVayne = config.xVayne ?? null
     form.enabled = Boolean(config.enabled)
     form.maxAttempts = config.maxAttempts ?? 12
     form.minIntervalMs = config.minIntervalMs ?? 100
@@ -167,10 +170,14 @@ onMounted(async () => {
           <el-form-item label="silk_id" prop="silkId">
             <el-input-number v-model="form.silkId" :min="1" :controls="false" placeholder="126938104" class="full-width" />
           </el-form-item>
+          <el-form-item label="X-Vayne（小蚕用户标识）" prop="xVayne">
+            <el-input-number v-model="form.xVayne" :min="1" :controls="false" placeholder="1836966" class="full-width" />
+            <p class="field-note">从抢单成功请求的请求头中复制 X-Vayne；它不是登录 Token。</p>
+          </el-form-item>
           <el-form-item label="X-Sivir（小蚕登录态）" prop="xSivir">
             <el-input v-model="form.xSivir" type="password" show-password :placeholder="xSivirMasked ? '留空则保留 ' + xSivirMasked : '请输入抓包得到的 X-Sivir'" />
             <p v-if="xSivirMasked" class="field-note">已保存：{{ xSivirMasked }}</p>
-            <p class="field-note">项目网页登录 Token 不用于小蚕接口；自动抢单需要这里的 silk_id 和 X-Sivir。</p>
+            <p class="field-note">项目网页登录 Token 不用于小蚕接口；大牌券和自动抢单共用 silk_id、X-Vayne 与 X-Sivir。</p>
           </el-form-item>
 
           <div class="time-row">

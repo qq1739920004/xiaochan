@@ -19,7 +19,12 @@ class XiaochanHttpStoreAutoClaimTest {
         assertEquals("Silkworm", request.headers().get("servername"));
         assertEquals("SilkwormService.GrabPromotionQuota", request.headers().get("methodname"));
         assertEquals("token-value", request.headers().get("X-Sivir"));
+        assertEquals("1836966", request.headers().get("X-Vayne"));
         assertEquals("126938104", request.headers().get("x-Teemo"));
+        assertEquals("iOS", request.headers().get("X-Platform"));
+        assertEquals("3.19.1.0", request.headers().get("X-Version"));
+        assertEquals("XC;iOS;3.19.1", request.headers().get("User-Agent"));
+        assertTrue(request.headers().get("X-Nami").contains("126938104"));
         assertFalse(request.body().contains("redpack_id"));
         assertTrue(request.body().contains("\"promotion_id\":987654321"));
     }
@@ -52,7 +57,7 @@ class XiaochanHttpStoreAutoClaimTest {
     }
 
     private StoreAutoClaimRequest request(Long redpackId) {
-        return new StoreAutoClaimRequest(126938104L, "token-value", 310114, "121.400", "31.200",
+        return new StoreAutoClaimRequest(126938104L, "token-value", 1836966L, 310114, "121.400", "31.200",
                 987654321L, 1, redpackId);
     }
 }
