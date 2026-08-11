@@ -14,6 +14,8 @@ import java.util.function.Supplier;
 public class BrandCardClaimExecutor {
     private static final ZoneId ZONE_ID = ZoneId.of("Asia/Shanghai");
     private static final Duration EXECUTION_WINDOW = Duration.ofSeconds(3);
+    private static final int MAX_AUTOMATIC_ATTEMPTS = 5;
+    private static final Duration FINAL_WAIT_SLICE = Duration.ofMillis(2);
 
     private final BrandCardClaimClient client;
     private final Clock clock;
@@ -46,13 +48,18 @@ public class BrandCardClaimExecutor {
         waitUntil(target);
         Instant deadline = target.plus(EXECUTION_WINDOW);
         BrandCardClaimAttemptResult lastAttempt = null;
+        Instant firstAttemptAt = null;
         int attempts = 0;
+        int attemptLimit = Math.min(Math.max(1, maxAttempts), MAX_AUTOMATIC_ATTEMPTS);
 
-        while (attempts < maxAttempts && !clock.instant().isAfter(deadline)) {
+        while (attempts < attemptLimit && !clock.instant().isAfter(deadline)) {
             attempts++;
+            if (firstAttemptAt == null) {
+                firstAttemptAt = clock.instant();
+            }
             lastAttempt = client.claim(silkId, xSivir, xVayne);
             if (!lastAttempt.retryable()) {
-                return BrandCardClaimExecutionResult.fromAttempt(attempts, lastAttempt);
+                return BrandCardClaimExecutionResult.fromAttempt(attempts, lastAttempt, firstAttemptAt);
             }
 
             Duration interval = clamp(intervalSupplier.get(), minInterval, maxInterval);
@@ -62,7 +69,7 @@ public class BrandCardClaimExecutor {
             sleep(interval);
         }
 
-        BrandCardClaimStopReason reason = attempts >= maxAttempts
+        BrandCardClaimStopReason reason = attempts >= attemptLimit
                 ? BrandCardClaimStopReason.MAX_ATTEMPTS_REACHED
                 : BrandCardClaimStopReason.TIME_WINDOW_EXPIRED;
         return new BrandCardClaimExecutionResult(
@@ -70,13 +77,19 @@ public class BrandCardClaimExecutor {
                 false,
                 lastAttempt == null ? null : lastAttempt.code(),
                 lastAttempt == null ? "未进入领取时间窗口" : lastAttempt.message(),
-                reason
+                reason,
+                firstAttemptAt
         );
     }
 
     private void waitUntil(Instant target) {
-        Duration wait = Duration.between(clock.instant(), target);
-        if (!wait.isNegative() && !wait.isZero()) {
+        while (true) {
+            Duration remaining = Duration.between(clock.instant(), target);
+            if (remaining.isNegative() || remaining.isZero()) {
+                return;
+            }
+            Duration wait = remaining.compareTo(FINAL_WAIT_SLICE) > 0
+                    ? remaining.minus(FINAL_WAIT_SLICE) : remaining;
             sleep(wait);
         }
     }

@@ -20,9 +20,9 @@ public class BrandCardClaimConfigDTO {
     private String xSivir;
     @NotNull(message = "请设置是否启用")
     private Boolean enabled;
-    @Min(value = 1, message = "最大请求次数至少为 1")
-    @Max(value = 30, message = "最大请求次数不能超过 30")
-    private Integer maxAttempts = 12;
+    @Min(value = 5, message = "自动领取固定为 5 次请求")
+    @Max(value = 5, message = "自动领取固定为 5 次请求")
+    private Integer maxAttempts = 5;
     @Min(value = 50, message = "最小请求间隔不能低于 50ms")
     @Max(value = 2000, message = "最小请求间隔不能超过 2000ms")
     private Integer minIntervalMs = 100;

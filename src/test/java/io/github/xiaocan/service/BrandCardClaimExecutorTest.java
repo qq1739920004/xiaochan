@@ -78,6 +78,30 @@ class BrandCardClaimExecutorTest {
         assertEquals(Duration.ofMillis(150), Duration.between(callTimes.get(1), callTimes.get(2)));
     }
 
+    @Test
+    void limitsAutomaticRetriesToFiveEvenWhenAnOldConfigRequestsMore() {
+        MutableClock clock = new MutableClock("2026-07-31T09:29:58+08:00");
+        List<Instant> callTimes = new ArrayList<>();
+        BrandCardClaimClient client = (silkId, xSivir) -> {
+            callTimes.add(clock.instant());
+            return BrandCardClaimAttemptResult.retryable(null, "网络超时");
+        };
+
+        BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
+                client,
+                clock,
+                duration -> clock.advance(duration),
+                () -> Duration.ofMillis(100)
+        );
+
+        BrandCardClaimExecutionResult result = executor.executeAutomatic(126938104L, "token", 12,
+                Duration.ofMillis(100), Duration.ofMillis(400));
+
+        assertEquals(5, result.attempts());
+        assertEquals(Instant.parse("2026-07-31T01:30:00Z"), callTimes.get(0));
+        assertEquals(BrandCardClaimStopReason.MAX_ATTEMPTS_REACHED, result.stopReason());
+    }
+
     private static final class MutableClock extends Clock {
         private final ZoneId zone = ZoneId.of("Asia/Shanghai");
         private Instant instant;

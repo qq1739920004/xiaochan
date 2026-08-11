@@ -29,8 +29,8 @@ const form = reactive({
   xVayne: null as number | null,
   xSivir: '',
   enabled: false,
-  cron: '58 29 9 * * ?',
-  maxAttempts: 12,
+  cron: '55 29 9 * * ?',
+  maxAttempts: 5,
   minIntervalMs: 100,
   maxIntervalMs: 400,
 })
@@ -38,7 +38,6 @@ const form = reactive({
 const rules = {
   silkId: [{ required: true, message: '请输入 silk_id', trigger: 'blur' }],
   xVayne: [{ required: true, message: '请输入 X-Vayne', trigger: 'blur' }],
-  maxAttempts: [{ required: true, message: '请输入最大请求次数', trigger: 'blur' }],
   minIntervalMs: [{ required: true, message: '请输入最小间隔', trigger: 'blur' }],
   maxIntervalMs: [{ required: true, message: '请输入最大间隔', trigger: 'blur' }],
 }
@@ -54,8 +53,8 @@ async function loadConfig() {
     form.silkId = config.silkId ?? account?.silkId ?? null
     form.xVayne = config.xVayne ?? account?.xVayne ?? null
     form.enabled = Boolean(config.enabled)
-    form.cron = config.cron || '58 29 9 * * ?'
-    form.maxAttempts = config.maxAttempts ?? 12
+    form.cron = config.cron || '55 29 9 * * ?'
+    form.maxAttempts = 5
     form.minIntervalMs = config.minIntervalMs ?? 100
     form.maxIntervalMs = config.maxIntervalMs ?? 400
     xSivirMasked.value = config.xSivirMasked || ''
@@ -101,7 +100,7 @@ async function saveConfig() {
   }
   saving.value = true
   try {
-    const payload: any = { ...form }
+    const payload: any = { ...form, maxAttempts: 5 }
     if (!payload.xSivir.trim()) {
       delete (payload as Partial<typeof payload>).xSivir
     }
@@ -189,7 +188,7 @@ onMounted(async () => {
         <div class="panel-header">
           <div>
             <h2>领取配置</h2>
-            <p>准备 cron 触发后 2 秒开始请求；凭证同时供监控自动抢单使用</p>
+            <p>09:29:55 仅预热；09:30:00.000 才开始请求；凭证同时供监控自动抢单使用</p>
           </div>
           <el-switch v-model="form.enabled" inline-prompt active-text="开" inactive-text="关" />
         </div>
@@ -223,21 +222,22 @@ onMounted(async () => {
           <div class="time-row">
             <div class="time-cell">
               <span>首次请求时间</span>
-              <strong><el-icon><Clock /></el-icon> cron + 2 秒</strong>
+              <strong><el-icon><Clock /></el-icon> cron + 5 秒</strong>
             </div>
             <div class="time-cell">
               <span>预备启动</span>
-              <strong>09:29:58</strong>
+              <strong>09:29:55</strong>
             </div>
           </div>
           <el-form-item label="准备 cron（含秒）">
-            <el-input v-model="form.cron" placeholder="58 29 9 * * ?" />
-            <p class="field-note">默认 09:29:58 准备，09:30:00 开始请求；每个账号可单独设置。</p>
+            <el-input v-model="form.cron" placeholder="55 29 9 * * ?" />
+            <p class="field-note">默认 09:29:55 仅预热，09:30:00.000 发出第 1 次请求；每个账号可单独设置。</p>
           </el-form-item>
 
           <div class="number-grid">
-            <el-form-item label="最大请求次数" prop="maxAttempts">
-              <el-input-number v-model="form.maxAttempts" :min="1" :max="30" class="full-width" />
+            <el-form-item label="自动请求次数">
+              <el-input-number v-model="form.maxAttempts" :min="5" :max="5" :controls="false" disabled class="full-width" />
+              <p class="field-note">固定 5 次；领取成功、已领取或已抢完会立即停止。</p>
             </el-form-item>
             <el-form-item label="最小间隔 (ms)" prop="minIntervalMs">
               <el-input-number v-model="form.minIntervalMs" :min="50" :max="2000" class="full-width" />
@@ -258,9 +258,10 @@ onMounted(async () => {
         <div class="result-icon"><el-icon><Warning /></el-icon></div>
         <h2>执行规则</h2>
         <dl>
-          <div><dt>首次请求</dt><dd>准备 cron + 2 秒</dd></div>
+          <div><dt>首次请求</dt><dd>09:30:00.000</dd></div>
+          <div><dt>最多请求</dt><dd>5 次</dd></div>
           <div><dt>随机间隔</dt><dd>{{ form.minIntervalMs }}-{{ form.maxIntervalMs }}ms</dd></div>
-          <div><dt>最晚停止</dt><dd>09:30:03.000</dd></div>
+          <div><dt>停止条件</dt><dd>成功或明确失败立即停止</dd></div>
         </dl>
         <div v-if="lastResult" class="last-result">
           <span>最近手动请求</span>
