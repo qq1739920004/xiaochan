@@ -37,6 +37,7 @@ import java.time.ZoneId;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 
 @Slf4j
@@ -44,8 +45,9 @@ import java.util.List;
 public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigMapper, BrandCardClaimConfigEntity>
         implements BrandCardClaimService {
     private static final ZoneId APP_ZONE = ZoneId.of("Asia/Shanghai");
-    private static final String DEFAULT_CRON = "58 29 9 * * ?";
-    private static final int DEFAULT_MAX_ATTEMPTS = 12;
+    private static final String LEGACY_DEFAULT_CRON = "58 29 9 * * ?";
+    private static final String DEFAULT_CRON = "55 29 9 * * ?";
+    private static final int DEFAULT_MAX_ATTEMPTS = 5;
     private static final int DEFAULT_MIN_INTERVAL_MS = 100;
     private static final int DEFAULT_MAX_INTERVAL_MS = 400;
     private final Map<Integer, LocalDateTime> lastScheduledRuns = new ConcurrentHashMap<>();
@@ -90,7 +92,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         if (dto.getMinIntervalMs() > dto.getMaxIntervalMs()) {
             throw new BusinessException("最小请求间隔不能大于最大请求间隔");
         }
-        String cron = StringUtils.hasText(dto.getCron()) ? dto.getCron().trim() : DEFAULT_CRON;
+        String cron = normalizeCron(dto.getCron());
         if (!CronExpression.isValidExpression(cron)) {
             throw new BusinessException("大牌券准备 cron 格式不正确，应为 6 位含秒表达式");
         }
@@ -128,7 +130,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         config.setXVayne(dto.getXVayne());
         config.setEnabled(dto.getEnabled());
         config.setCron(cron);
-        config.setMaxAttempts(dto.getMaxAttempts());
+        config.setMaxAttempts(DEFAULT_MAX_ATTEMPTS);
         config.setMinIntervalMs(dto.getMinIntervalMs());
         config.setMaxIntervalMs(dto.getMaxIntervalMs());
         if (StringUtils.hasText(dto.getXSivir())) {
@@ -149,13 +151,14 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     @Override
     public BrandCardClaimExecutionResult claimNow(Integer accountId) {
         BrandCardClaimConfigEntity config = requireCurrentUserConfig(accountId);
-        LocalDateTime startTime = LocalDateTime.now(APP_ZONE);
+        Instant firstAttemptAt = Instant.now();
         BrandCardClaimAttemptResult attempt = XiaochanHttp.grabExtraBrandCard(
                 config.getSilkId(), config.getXSivir(), config.getXVayne());
         BrandCardClaimExecutionResult result = attempt.retryable()
-                ? new BrandCardClaimExecutionResult(1, false, attempt.code(), attempt.message(), BrandCardClaimStopReason.TIME_WINDOW_EXPIRED)
-                : BrandCardClaimExecutionResult.fromAttempt(1, attempt);
-        saveHistory(config, startTime, result);
+                ? new BrandCardClaimExecutionResult(1, false, attempt.code(), attempt.message(),
+                BrandCardClaimStopReason.TIME_WINDOW_EXPIRED, firstAttemptAt)
+                : BrandCardClaimExecutionResult.fromAttempt(1, attempt, firstAttemptAt);
+        saveHistory(config, LocalDateTime.ofInstant(firstAttemptAt, APP_ZONE), result);
         return result;
     }
 
@@ -204,25 +207,25 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     }
 
     private boolean isPreparationDue(BrandCardClaimConfigEntity config, LocalDateTime now) {
-        String cron = StringUtils.hasText(config.getCron()) ? config.getCron() : DEFAULT_CRON;
+        String cron = normalizeCron(config.getCron());
         if (!CronExpression.isValidExpression(cron)) return false;
         LocalDateTime next = CronExpression.parse(cron).next(now.minusSeconds(1));
         return next != null && next.withNano(0).equals(now);
     }
 
     private Instant preparationTarget(BrandCardClaimConfigEntity config, LocalDateTime preparationTime) {
-        String cron = StringUtils.hasText(config.getCron()) ? config.getCron() : DEFAULT_CRON;
+        String cron = normalizeCron(config.getCron());
         LocalDateTime scheduled = CronExpression.parse(cron).next(preparationTime.minusSeconds(1));
-        return (scheduled == null ? preparationTime.plusSeconds(2) : scheduled.plusSeconds(2))
+        return (scheduled == null ? preparationTime.plusSeconds(5) : scheduled.plusSeconds(5))
                 .atZone(APP_ZONE).toInstant();
     }
 
     private void runAutomaticClaim(BrandCardClaimConfigEntity config, Instant target) {
-        LocalDateTime startTime = LocalDateTime.now(APP_ZONE);
+        taskScheduler.execute(XiaochanHttp::warmBrandCardEndpoint);
         BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
                 (silkId, xSivir) -> XiaochanHttp.grabExtraBrandCard(silkId, xSivir, config.getXVayne()),
                 Clock.system(APP_ZONE),
-                duration -> Thread.sleep(duration.toMillis()),
+                duration -> TimeUnit.NANOSECONDS.sleep(duration.toNanos()),
                 () -> Duration.ofMillis(ThreadLocalRandom.current().nextLong(
                         config.getMinIntervalMs(), config.getMaxIntervalMs() + 1L))
         );
@@ -230,11 +233,14 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 config.getSilkId(),
                 config.getXSivir(),
                 config.getXVayne(),
-                config.getMaxAttempts(),
+                DEFAULT_MAX_ATTEMPTS,
                 Duration.ofMillis(config.getMinIntervalMs()),
                 Duration.ofMillis(config.getMaxIntervalMs()),
                 target
         );
+        LocalDateTime startTime = result.firstAttemptAt() == null
+                ? LocalDateTime.ofInstant(target, APP_ZONE)
+                : LocalDateTime.ofInstant(result.firstAttemptAt(), APP_ZONE);
         saveHistory(config, startTime, result);
         log.info("brand card claim completed: configId={}, attempts={}, reason={}",
                 config.getId(), result.attempts(), result.stopReason());
@@ -274,8 +280,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         vo.setXVayne(config.getXVayne());
         vo.setXSivirMasked(mask(config.getXSivir()));
         vo.setEnabled(config.getEnabled());
-        vo.setCron(config.getCron());
-        vo.setMaxAttempts(config.getMaxAttempts());
+        vo.setCron(normalizeCron(config.getCron()));
+        vo.setMaxAttempts(DEFAULT_MAX_ATTEMPTS);
         vo.setMinIntervalMs(config.getMinIntervalMs());
         vo.setMaxIntervalMs(config.getMaxIntervalMs());
         return vo;
@@ -289,6 +295,13 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
             return "********";
         }
         return value.substring(0, 6) + "..." + value.substring(value.length() - 4);
+    }
+
+    private String normalizeCron(String cron) {
+        if (!StringUtils.hasText(cron) || LEGACY_DEFAULT_CRON.equals(cron.trim())) {
+            return DEFAULT_CRON;
+        }
+        return cron.trim();
     }
 
     private void saveHistory(BrandCardClaimConfigEntity config, LocalDateTime startTime,

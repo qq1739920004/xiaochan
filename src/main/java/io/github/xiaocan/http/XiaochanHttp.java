@@ -21,6 +21,7 @@ import org.springframework.beans.BeanUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.InetAddress;
 import java.util.*;
 
 @Slf4j
@@ -128,6 +129,15 @@ public class XiaochanHttp {
             if (response != null) {
                 response.close();
             }
+        }
+    }
+
+    /** Resolves the endpoint before the fixed claim time without invoking any business API. */
+    public static void warmBrandCardEndpoint() {
+        try {
+            InetAddress.getAllByName("gw.xiaocantech.com");
+        } catch (Exception e) {
+            log.debug("brand card DNS warm-up failed: {}", e.getMessage());
         }
     }
 
