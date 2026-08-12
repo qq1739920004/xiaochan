@@ -97,7 +97,7 @@ public class XiaochanHttp {
                     .body(request.body())
                     .execute();
             if (!response.isOk()) {
-                return BrandCardClaimAttemptResult.retryable(null, "HTTP 状态码: " + response.getStatus());
+                return classifyBrandCardHttpFailure(response.getStatus());
             }
             JSONObject result = JSONObject.parseObject(response.body());
             Integer verifyMethod = result.getInteger("verify_method");
@@ -132,12 +132,27 @@ public class XiaochanHttp {
         }
     }
 
+    static BrandCardClaimAttemptResult classifyBrandCardHttpFailure(int status) {
+        String message = "HTTP 状态码: " + status;
+        if (status == 401 || status == 403) {
+            return BrandCardClaimAttemptResult.stop(status, message, BrandCardClaimStopReason.AUTH_INVALID);
+        }
+        if (status >= 400 && status < 500 && status != 429) {
+            return BrandCardClaimAttemptResult.stop(status, message, BrandCardClaimStopReason.BUSINESS_FAILED);
+        }
+        return BrandCardClaimAttemptResult.retryable(status, message);
+    }
+
     /** Resolves the endpoint before the fixed claim time without invoking any business API. */
     public static void warmBrandCardEndpoint() {
+        long startedAt = System.nanoTime();
         try {
-            InetAddress.getAllByName("gw.xiaocantech.com");
+            InetAddress[] addresses = InetAddress.getAllByName("gw.xiaocantech.com");
+            log.info("brand card DNS warm-up completed: addressCount={}, durationMs={}",
+                    addresses.length, (System.nanoTime() - startedAt) / 1_000_000);
         } catch (Exception e) {
-            log.debug("brand card DNS warm-up failed: {}", e.getMessage());
+            log.warn("brand card DNS warm-up failed: durationMs={}, message={}",
+                    (System.nanoTime() - startedAt) / 1_000_000, e.getMessage());
         }
     }
 
