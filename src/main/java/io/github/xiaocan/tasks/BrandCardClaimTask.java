@@ -14,7 +14,7 @@ public class BrandCardClaimTask {
 
     @Scheduled(fixedDelay = 1000, initialDelay = 1000)
     public void claimBrandCard() {
-        log.info("brand card claim preparation started");
+        log.debug("brand card claim scheduler tick");
         brandCardClaimService.runScheduledClaims();
     }
 }
