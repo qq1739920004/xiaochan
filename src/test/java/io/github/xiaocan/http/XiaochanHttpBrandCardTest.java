@@ -1,5 +1,6 @@
 package io.github.xiaocan.http;
 
+import io.github.xiaocan.model.BrandCardClaimStopReason;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -41,5 +42,12 @@ class XiaochanHttpBrandCardTest {
 
         assertNotEquals(first.headers().get("X-Nami"), second.headers().get("X-Nami"));
         assertNotEquals(first.headers().get("X-Session-Id"), second.headers().get("X-Session-Id"));
+    }
+
+    @Test
+    void treatsUnauthorizedBrandCardResponseAsTerminal() {
+        assertEquals(BrandCardClaimStopReason.AUTH_INVALID,
+                XiaochanHttp.classifyBrandCardHttpFailure(401).stopReason());
+        assertTrue(XiaochanHttp.classifyBrandCardHttpFailure(503).retryable());
     }
 }

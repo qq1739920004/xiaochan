@@ -43,6 +43,7 @@ class BrandCardClaimExecutorTest {
         assertFalse(result.success());
         assertEquals(1, result.attempts());
         assertEquals(BrandCardClaimStopReason.SOLD_OUT, result.stopReason());
+        assertEquals(callTimes.get(0), result.firstAttemptAt());
         assertEquals(LocalDateTime.of(2026, 7, 31, 9, 30),
                 LocalDateTime.ofInstant(callTimes.get(0), ZoneId.of("Asia/Shanghai")));
     }

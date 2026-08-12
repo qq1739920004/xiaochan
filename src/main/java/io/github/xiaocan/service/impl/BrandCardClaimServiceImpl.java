@@ -38,6 +38,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.List;
 
 @Slf4j
@@ -201,7 +202,11 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 .forEach(config -> {
                     LocalDateTime previous = lastScheduledRuns.put(config.getId(), now);
                     if (previous == null || !previous.equals(now)) {
-                        taskScheduler.execute(() -> runAutomaticClaim(config, preparationTarget(config, now)));
+                        Instant target = preparationTarget(config, now);
+                        log.info("brand card claim prepared: configId={}, accountId={}, preparationAt={}, targetAt={}, attemptLimit={}, intervalMs={}-{}",
+                                config.getId(), config.getAccountId(), now, target, DEFAULT_MAX_ATTEMPTS,
+                                config.getMinIntervalMs(), config.getMaxIntervalMs());
+                        taskScheduler.execute(() -> runAutomaticClaim(config, target));
                     }
                 });
     }
@@ -221,9 +226,25 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     }
 
     private void runAutomaticClaim(BrandCardClaimConfigEntity config, Instant target) {
+        Instant preparedAt = Instant.now();
+        AtomicInteger requestSequence = new AtomicInteger();
+        log.info("brand card claim worker started: configId={}, accountId={}, targetAt={}, waitMs={}",
+                config.getId(), config.getAccountId(), target,
+                Math.max(0, Duration.between(preparedAt, target).toMillis()));
         taskScheduler.execute(XiaochanHttp::warmBrandCardEndpoint);
         BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
-                (silkId, xSivir) -> XiaochanHttp.grabExtraBrandCard(silkId, xSivir, config.getXVayne()),
+                (silkId, xSivir) -> {
+                    int attempt = requestSequence.incrementAndGet();
+                    Instant requestStartedAt = Instant.now();
+                    log.info("brand card claim request sent: configId={}, attempt={}, targetOffsetMs={}",
+                            config.getId(), attempt, Duration.between(target, requestStartedAt).toMillis());
+                    BrandCardClaimAttemptResult response = XiaochanHttp.grabExtraBrandCard(silkId, xSivir,
+                            config.getXVayne());
+                    log.info("brand card claim response received: configId={}, attempt={}, durationMs={}, code={}, reason={}, retryable={}, message={}",
+                            config.getId(), attempt, Duration.between(requestStartedAt, Instant.now()).toMillis(),
+                            response.code(), response.stopReason(), response.retryable(), safeLogMessage(response.message()));
+                    return response;
+                },
                 Clock.system(APP_ZONE),
                 duration -> TimeUnit.NANOSECONDS.sleep(duration.toNanos()),
                 () -> Duration.ofMillis(ThreadLocalRandom.current().nextLong(
@@ -242,8 +263,12 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 ? LocalDateTime.ofInstant(target, APP_ZONE)
                 : LocalDateTime.ofInstant(result.firstAttemptAt(), APP_ZONE);
         saveHistory(config, startTime, result);
-        log.info("brand card claim completed: configId={}, attempts={}, reason={}",
-                config.getId(), result.attempts(), result.stopReason());
+        long firstRequestOffsetMs = result.firstAttemptAt() == null ? 0
+                : Duration.between(target, result.firstAttemptAt()).toMillis();
+        log.info("brand card claim completed: configId={}, accountId={}, firstRequestAt={}, targetOffsetMs={}, attempts={}, success={}, code={}, reason={}, durationMs={}, message={}",
+                config.getId(), config.getAccountId(), result.firstAttemptAt(), firstRequestOffsetMs,
+                result.attempts(), result.success(), result.resultCode(), result.stopReason(),
+                Duration.between(preparedAt, Instant.now()).toMillis(), safeLogMessage(result.resultMessage()));
     }
 
     private BrandCardClaimConfigEntity requireCurrentUserConfig(Integer accountId) {
@@ -302,6 +327,14 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
             return DEFAULT_CRON;
         }
         return cron.trim();
+    }
+
+    private String safeLogMessage(String message) {
+        if (!StringUtils.hasText(message)) {
+            return "";
+        }
+        String normalized = message.replaceAll("[\\r\\n]+", " ");
+        return normalized.length() <= 240 ? normalized : normalized.substring(0, 240) + "...";
     }
 
     private void saveHistory(BrandCardClaimConfigEntity config, LocalDateTime startTime,
