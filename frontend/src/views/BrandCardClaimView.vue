@@ -188,7 +188,7 @@ onMounted(async () => {
         <div class="panel-header">
           <div>
             <h2>领取配置</h2>
-            <p>09:29:55 仅预热；09:30:00.000 才开始请求；凭证同时供监控自动抢单使用</p>
+            <p>09:29:55.000 开始请求；凭证同时供监控自动抢单使用</p>
           </div>
           <el-switch v-model="form.enabled" inline-prompt active-text="开" inactive-text="关" />
         </div>
@@ -222,16 +222,16 @@ onMounted(async () => {
           <div class="time-row">
             <div class="time-cell">
               <span>首次请求时间</span>
-              <strong><el-icon><Clock /></el-icon> cron + 5 秒</strong>
+              <strong><el-icon><Clock /></el-icon> cron 时刻</strong>
             </div>
             <div class="time-cell">
-              <span>预备启动</span>
+              <span>默认执行</span>
               <strong>09:29:55</strong>
             </div>
           </div>
           <el-form-item label="准备 cron（含秒）">
             <el-input v-model="form.cron" placeholder="55 29 9 * * ?" />
-            <p class="field-note">默认 09:29:55 仅预热，09:30:00.000 发出第 1 次请求；每个账号可单独设置。</p>
+            <p class="field-note">默认 09:29:55.000 发出第 1 次请求；每个账号可单独设置。</p>
           </el-form-item>
 
           <div class="number-grid">
@@ -258,7 +258,7 @@ onMounted(async () => {
         <div class="result-icon"><el-icon><Warning /></el-icon></div>
         <h2>执行规则</h2>
         <dl>
-          <div><dt>首次请求</dt><dd>09:30:00.000</dd></div>
+          <div><dt>首次请求</dt><dd>09:29:55.000</dd></div>
           <div><dt>最多请求</dt><dd>5 次</dd></div>
           <div><dt>随机间隔</dt><dd>{{ form.minIntervalMs }}-{{ form.maxIntervalMs }}ms</dd></div>
           <div><dt>停止条件</dt><dd>成功或明确失败立即停止</dd></div>

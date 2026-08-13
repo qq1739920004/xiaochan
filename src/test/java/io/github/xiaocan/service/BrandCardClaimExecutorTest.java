@@ -21,8 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BrandCardClaimExecutorTest {
 
     @Test
-    void automaticClaimWaitsUntilNineThirtyBeforeFirstRequest() {
-        MutableClock clock = new MutableClock("2026-07-31T09:29:58+08:00");
+    void automaticClaimWaitsUntilNineTwentyNineFiftyFiveBeforeFirstRequest() {
+        MutableClock clock = new MutableClock("2026-07-31T09:29:50+08:00");
         List<Instant> callTimes = new ArrayList<>();
         BrandCardClaimClient client = (silkId, xSivir) -> {
             callTimes.add(clock.instant());
@@ -37,14 +37,15 @@ class BrandCardClaimExecutorTest {
                 () -> Duration.ofMillis(100)
         );
 
-        BrandCardClaimExecutionResult result = executor.executeAutomatic(126938104L, "token", 12,
-                Duration.ofMillis(100), Duration.ofMillis(400));
+        Instant target = Instant.parse("2026-07-31T01:29:55Z");
+        BrandCardClaimExecutionResult result = executor.executeAutomatic(126938104L, "token", null, 12,
+                Duration.ofMillis(100), Duration.ofMillis(400), target);
 
         assertFalse(result.success());
         assertEquals(1, result.attempts());
         assertEquals(BrandCardClaimStopReason.SOLD_OUT, result.stopReason());
         assertEquals(callTimes.get(0), result.firstAttemptAt());
-        assertEquals(LocalDateTime.of(2026, 7, 31, 9, 30),
+        assertEquals(LocalDateTime.of(2026, 7, 31, 9, 29, 55),
                 LocalDateTime.ofInstant(callTimes.get(0), ZoneId.of("Asia/Shanghai")));
     }
 
