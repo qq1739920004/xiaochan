@@ -221,7 +221,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private Instant preparationTarget(BrandCardClaimConfigEntity config, LocalDateTime preparationTime) {
         String cron = normalizeCron(config.getCron());
         LocalDateTime scheduled = CronExpression.parse(cron).next(preparationTime.minusSeconds(1));
-        return (scheduled == null ? preparationTime.plusSeconds(5) : scheduled.plusSeconds(5))
+        return (scheduled == null ? preparationTime : scheduled)
                 .atZone(APP_ZONE).toInstant();
     }
 
