@@ -768,6 +768,7 @@ public class XiaochanHttp {
         List<StoreInfo> result = new ArrayList<>();
         JSONArray promotionList = jsonBody.getJSONArray("promotion_list");
         if (promotionList == null) {
+            log.warn("小蚕上游列表响应未包含 promotion_list");
             return result;
         }
         for (int i = 0; i < promotionList.size(); i++) {

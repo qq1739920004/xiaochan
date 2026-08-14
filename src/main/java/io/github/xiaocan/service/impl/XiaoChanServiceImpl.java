@@ -67,9 +67,15 @@ public class XiaoChanServiceImpl implements XiaoChanService {
                 result = getListByOffset(queryListVO.getCityCode(), queryListVO.getLongitude(), queryListVO.getLatitude(), queryListVO.getPageSize() * pageNum);
             }
         }
-        return result.stream()
+        List<StoreInfo> distanceQualified = result.stream()
                 .filter(this::withinDistanceLimit)
                 .toList();
+        if (result.isEmpty() || distanceQualified.isEmpty()) {
+            log.warn("小蚕门店查询结果为空：城市={}, 页码={}, 关键词={}, 排序={}, 上游活动数={}, 距离过滤后活动数={}, 距离上限={}米",
+                    queryListVO.getCityCode(), queryListVO.getPageNum(), queryListVO.getName(),
+                    queryListVO.getOrderType(), result.size(), distanceQualified.size(), MAX_DISTANCE);
+        }
+        return distanceQualified;
     }
 
     @Override
