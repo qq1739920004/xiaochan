@@ -8,6 +8,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.EnumSet;
 import java.time.ZoneId;
 import java.util.function.Supplier;
 
@@ -80,6 +81,58 @@ public class BrandCardClaimExecutor {
                 reason,
                 firstAttemptAt
         );
+    }
+
+    public BrandCardClaimExecutionResult executeContinuous(Long silkId, String xSivir, Long xVayne,
+                                                             int maxAttempts, Duration minInterval,
+                                                             Duration maxInterval, Instant target,
+                                                             Instant deadline) {
+        waitUntil(target);
+        BrandCardClaimAttemptResult lastAttempt = null;
+        Instant firstAttemptAt = null;
+        int attempts = 0;
+
+        while (attempts < maxAttempts && clock.instant().isBefore(deadline)) {
+            attempts++;
+            if (firstAttemptAt == null) {
+                firstAttemptAt = clock.instant();
+            }
+            lastAttempt = client.claim(silkId, xSivir, xVayne);
+            if (isContinuousWindowTerminal(lastAttempt)) {
+                return BrandCardClaimExecutionResult.fromAttempt(attempts, lastAttempt, firstAttemptAt);
+            }
+
+            Duration interval = clamp(intervalSupplier.get(), minInterval, maxInterval);
+            if (!clock.instant().plus(interval).isBefore(deadline)) {
+                break;
+            }
+            sleep(interval);
+        }
+
+        BrandCardClaimStopReason reason = attempts >= maxAttempts
+                ? BrandCardClaimStopReason.MAX_ATTEMPTS_REACHED
+                : BrandCardClaimStopReason.TIME_WINDOW_EXPIRED;
+        return new BrandCardClaimExecutionResult(
+                attempts,
+                false,
+                lastAttempt == null ? null : lastAttempt.code(),
+                lastAttempt == null ? "未进入连续领取窗口" : lastAttempt.message(),
+                reason,
+                firstAttemptAt
+        );
+    }
+
+    private boolean isContinuousWindowTerminal(BrandCardClaimAttemptResult attempt) {
+        if (attempt.retryable() || attempt.stopReason() == null) {
+            return false;
+        }
+        return EnumSet.of(
+                BrandCardClaimStopReason.SUCCESS,
+                BrandCardClaimStopReason.SOLD_OUT,
+                BrandCardClaimStopReason.ALREADY_CLAIMED,
+                BrandCardClaimStopReason.NEED_VERIFY,
+                BrandCardClaimStopReason.AUTH_INVALID
+        ).contains(attempt.stopReason());
     }
 
     private void waitUntil(Instant target) {

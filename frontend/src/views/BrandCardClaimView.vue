@@ -32,7 +32,7 @@ const form = reactive({
   cron: '55 29 9 * * ?',
   maxAttempts: 5,
   minIntervalMs: 100,
-  maxIntervalMs: 400,
+  maxIntervalMs: 300,
 })
 
 const rules = {
@@ -55,8 +55,8 @@ async function loadConfig() {
     form.enabled = Boolean(config.enabled)
     form.cron = config.cron || '55 29 9 * * ?'
     form.maxAttempts = 5
-    form.minIntervalMs = config.minIntervalMs ?? 100
-    form.maxIntervalMs = config.maxIntervalMs ?? 400
+    form.minIntervalMs = 100
+    form.maxIntervalMs = 300
     xSivirMasked.value = config.xSivirMasked || ''
   } finally {
     loading.value = false
@@ -94,13 +94,9 @@ async function saveConfig() {
   } catch {
     return
   }
-  if (form.minIntervalMs > form.maxIntervalMs) {
-    ElMessage.warning('最小请求间隔不能大于最大请求间隔')
-    return
-  }
   saving.value = true
   try {
-    const payload: any = { ...form, maxAttempts: 5 }
+    const payload: any = { ...form, maxAttempts: 5, minIntervalMs: 100, maxIntervalMs: 300 }
     if (!payload.xSivir.trim()) {
       delete (payload as Partial<typeof payload>).xSivir
     }
@@ -188,7 +184,7 @@ onMounted(async () => {
         <div class="panel-header">
           <div>
             <h2>领取配置</h2>
-            <p>09:29:55 仅预热；09:30:00.000 才开始请求；凭证同时供监控自动抢单使用</p>
+            <p>09:29:57.000 至 09:30:01.000 连续请求；凭证同时供监控自动抢单使用</p>
           </div>
           <el-switch v-model="form.enabled" inline-prompt active-text="开" inactive-text="关" />
         </div>
@@ -222,28 +218,28 @@ onMounted(async () => {
           <div class="time-row">
             <div class="time-cell">
               <span>首次请求时间</span>
-              <strong><el-icon><Clock /></el-icon> cron + 5 秒</strong>
+              <strong><el-icon><Clock /></el-icon> 预备 cron + 2 秒</strong>
             </div>
             <div class="time-cell">
-              <span>预备启动</span>
-              <strong>09:29:55</strong>
+              <span>连续窗口</span>
+              <strong>09:29:57-09:30:01</strong>
             </div>
           </div>
           <el-form-item label="准备 cron（含秒）">
             <el-input v-model="form.cron" placeholder="55 29 9 * * ?" />
-            <p class="field-note">默认 09:29:55 仅预热，09:30:00.000 发出第 1 次请求；每个账号可单独设置。</p>
+            <p class="field-note">默认 09:29:55 预备，09:29:57.000 发出第 1 次请求，持续到 09:30:01.000。</p>
           </el-form-item>
 
           <div class="number-grid">
-            <el-form-item label="自动请求次数">
-              <el-input-number v-model="form.maxAttempts" :min="5" :max="5" :controls="false" disabled class="full-width" />
-              <p class="field-note">固定 5 次；领取成功、已领取或已抢完会立即停止。</p>
+            <el-form-item label="窗口安全上限">
+              <el-input model-value="100 次" disabled class="full-width" />
+              <p class="field-note">连续窗口内由结束时间控制；成功、已抢完、已领取、登录失效或需验证会立即停止。</p>
             </el-form-item>
             <el-form-item label="最小间隔 (ms)" prop="minIntervalMs">
-              <el-input-number v-model="form.minIntervalMs" :min="50" :max="2000" class="full-width" />
+              <el-input-number v-model="form.minIntervalMs" :min="100" :max="100" :controls="false" disabled class="full-width" />
             </el-form-item>
             <el-form-item label="最大间隔 (ms)" prop="maxIntervalMs">
-              <el-input-number v-model="form.maxIntervalMs" :min="50" :max="2000" class="full-width" />
+              <el-input-number v-model="form.maxIntervalMs" :min="300" :max="300" :controls="false" disabled class="full-width" />
             </el-form-item>
           </div>
         </el-form>
@@ -258,10 +254,10 @@ onMounted(async () => {
         <div class="result-icon"><el-icon><Warning /></el-icon></div>
         <h2>执行规则</h2>
         <dl>
-          <div><dt>首次请求</dt><dd>09:30:00.000</dd></div>
-          <div><dt>最多请求</dt><dd>5 次</dd></div>
+          <div><dt>连续窗口</dt><dd>09:29:57-09:30:01</dd></div>
+          <div><dt>安全上限</dt><dd>100 次</dd></div>
           <div><dt>随机间隔</dt><dd>{{ form.minIntervalMs }}-{{ form.maxIntervalMs }}ms</dd></div>
-          <div><dt>停止条件</dt><dd>成功或明确失败立即停止</dd></div>
+          <div><dt>停止条件</dt><dd>窗口结束或明确终态</dd></div>
         </dl>
         <div v-if="lastResult" class="last-result">
           <span>最近手动请求</span>

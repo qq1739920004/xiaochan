@@ -51,7 +51,9 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private static final String DEFAULT_CRON = "55 29 9 * * ?";
     private static final int DEFAULT_MAX_ATTEMPTS = 5;
     private static final int DEFAULT_MIN_INTERVAL_MS = 100;
-    private static final int DEFAULT_MAX_INTERVAL_MS = 400;
+    private static final int DEFAULT_MAX_INTERVAL_MS = 300;
+    private static final int CONTINUOUS_MAX_ATTEMPTS = 100;
+    private static final Duration CONTINUOUS_WINDOW = Duration.ofSeconds(4);
     private final Map<Integer, LocalDateTime> lastScheduledRuns = new ConcurrentHashMap<>();
 
     @Resource
@@ -133,8 +135,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         config.setEnabled(dto.getEnabled());
         config.setCron(cron);
         config.setMaxAttempts(DEFAULT_MAX_ATTEMPTS);
-        config.setMinIntervalMs(dto.getMinIntervalMs());
-        config.setMaxIntervalMs(dto.getMaxIntervalMs());
+        config.setMinIntervalMs(DEFAULT_MIN_INTERVAL_MS);
+        config.setMaxIntervalMs(DEFAULT_MAX_INTERVAL_MS);
         if (StringUtils.hasText(dto.getXSivir())) {
             config.setXSivir(dto.getXSivir().trim());
         }
@@ -204,9 +206,9 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                     LocalDateTime previous = lastScheduledRuns.put(config.getId(), now);
                     if (previous == null || !previous.equals(now)) {
                         Instant target = preparationTarget(config, now);
-                        log.info("大牌券领取已准备：配置={}, 账号={}, 预热时间={}, 目标时间={}, 最大次数={}, 间隔={}至{}毫秒",
-                                config.getId(), config.getAccountId(), now, target, DEFAULT_MAX_ATTEMPTS,
-                                config.getMinIntervalMs(), config.getMaxIntervalMs());
+                        log.info("大牌券连续窗口已准备：配置={}, 账号={}, 预备时间={}, 开始时间={}, 结束时间={}, 安全上限={}, 间隔={}至{}毫秒",
+                                config.getId(), config.getAccountId(), now, target, target.plus(CONTINUOUS_WINDOW),
+                                CONTINUOUS_MAX_ATTEMPTS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_INTERVAL_MS);
                         taskScheduler.execute(() -> runAutomaticClaim(config, target));
                     }
                 });
@@ -222,15 +224,15 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private Instant preparationTarget(BrandCardClaimConfigEntity config, LocalDateTime preparationTime) {
         String cron = normalizeCron(config.getCron());
         LocalDateTime scheduled = CronExpression.parse(cron).next(preparationTime.minusSeconds(1));
-        return (scheduled == null ? preparationTime.plusSeconds(5) : scheduled.plusSeconds(5))
+        return (scheduled == null ? preparationTime.plusSeconds(2) : scheduled.plusSeconds(2))
                 .atZone(APP_ZONE).toInstant();
     }
 
     private void runAutomaticClaim(BrandCardClaimConfigEntity config, Instant target) {
         Instant preparedAt = Instant.now();
         AtomicInteger requestSequence = new AtomicInteger();
-        log.info("大牌券领取任务已启动：配置={}, 账号={}, 目标时间={}, 等待={}毫秒",
-                config.getId(), config.getAccountId(), target,
+        log.info("大牌券连续窗口已启动：配置={}, 账号={}, 开始时间={}, 结束时间={}, 等待={}毫秒",
+                config.getId(), config.getAccountId(), target, target.plus(CONTINUOUS_WINDOW),
                 Math.max(0, Duration.between(preparedAt, target).toMillis()));
         taskScheduler.execute(XiaochanHttp::warmBrandCardEndpoint);
         BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
@@ -249,16 +251,17 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 Clock.system(APP_ZONE),
                 duration -> TimeUnit.NANOSECONDS.sleep(duration.toNanos()),
                 () -> Duration.ofMillis(ThreadLocalRandom.current().nextLong(
-                        config.getMinIntervalMs(), config.getMaxIntervalMs() + 1L))
+                        DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_INTERVAL_MS + 1L))
         );
-        BrandCardClaimExecutionResult result = executor.executeAutomatic(
+        BrandCardClaimExecutionResult result = executor.executeContinuous(
                 config.getSilkId(),
                 config.getXSivir(),
                 config.getXVayne(),
-                DEFAULT_MAX_ATTEMPTS,
-                Duration.ofMillis(config.getMinIntervalMs()),
-                Duration.ofMillis(config.getMaxIntervalMs()),
-                target
+                CONTINUOUS_MAX_ATTEMPTS,
+                Duration.ofMillis(DEFAULT_MIN_INTERVAL_MS),
+                Duration.ofMillis(DEFAULT_MAX_INTERVAL_MS),
+                target,
+                target.plus(CONTINUOUS_WINDOW)
         );
         LocalDateTime startTime = result.firstAttemptAt() == null
                 ? LocalDateTime.ofInstant(target, APP_ZONE)
@@ -266,7 +269,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         saveHistory(config, startTime, result);
         long firstRequestOffsetMs = result.firstAttemptAt() == null ? 0
                 : Duration.between(target, result.firstAttemptAt()).toMillis();
-        log.info("大牌券领取已结束：配置={}, 账号={}, 首次请求={}, 首次偏差={}毫秒, 请求次数={}, 成功={}, 响应码={}, 结束原因={}, 总耗时={}毫秒, 消息={}",
+        log.info("大牌券连续窗口已结束：配置={}, 账号={}, 首次请求={}, 首次偏差={}毫秒, 请求次数={}, 成功={}, 响应码={}, 结束原因={}, 总耗时={}毫秒, 消息={}",
                 config.getId(), config.getAccountId(), result.firstAttemptAt(), firstRequestOffsetMs,
                 result.attempts(), result.success(), result.resultCode(), result.stopReason(),
                 Duration.between(preparedAt, Instant.now()).toMillis(), safeLogMessage(result.resultMessage()));
@@ -308,8 +311,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         vo.setEnabled(config.getEnabled());
         vo.setCron(normalizeCron(config.getCron()));
         vo.setMaxAttempts(DEFAULT_MAX_ATTEMPTS);
-        vo.setMinIntervalMs(config.getMinIntervalMs());
-        vo.setMaxIntervalMs(config.getMaxIntervalMs());
+        vo.setMinIntervalMs(DEFAULT_MIN_INTERVAL_MS);
+        vo.setMaxIntervalMs(DEFAULT_MAX_INTERVAL_MS);
         return vo;
     }
 
