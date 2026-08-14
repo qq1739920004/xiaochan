@@ -82,6 +82,42 @@ public class BrandCardClaimExecutor {
         );
     }
 
+    public BrandCardClaimExecutionResult executeContinuous(Long silkId, String xSivir, Long xVayne,
+                                                             int maxAttempts, Duration minInterval,
+                                                             Duration maxInterval, Instant target,
+                                                             Instant deadline) {
+        waitUntil(target);
+        BrandCardClaimAttemptResult lastAttempt = null;
+        Instant firstAttemptAt = null;
+        int attempts = 0;
+
+        while (attempts < maxAttempts && clock.instant().isBefore(deadline)) {
+            attempts++;
+            if (firstAttemptAt == null) {
+                firstAttemptAt = clock.instant();
+            }
+            lastAttempt = client.claim(silkId, xSivir, xVayne);
+
+            Duration interval = clamp(intervalSupplier.get(), minInterval, maxInterval);
+            if (clock.instant().plus(interval).isAfter(deadline)) {
+                break;
+            }
+            sleep(interval);
+        }
+
+        BrandCardClaimStopReason reason = attempts >= maxAttempts
+                ? BrandCardClaimStopReason.MAX_ATTEMPTS_REACHED
+                : BrandCardClaimStopReason.TIME_WINDOW_EXPIRED;
+        return new BrandCardClaimExecutionResult(
+                attempts,
+                false,
+                lastAttempt == null ? null : lastAttempt.code(),
+                lastAttempt == null ? "未进入执行窗口" : lastAttempt.message(),
+                reason,
+                firstAttemptAt
+        );
+    }
+
     private void waitUntil(Instant target) {
         while (true) {
             Duration remaining = Duration.between(clock.instant(), target);
