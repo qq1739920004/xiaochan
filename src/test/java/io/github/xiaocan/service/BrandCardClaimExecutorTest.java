@@ -21,8 +21,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BrandCardClaimExecutorTest {
 
     @Test
-    void automaticClaimWaitsUntilNineTwentyNineFiftyFiveBeforeFirstRequest() {
-        MutableClock clock = new MutableClock("2026-07-31T09:29:50+08:00");
+    void automaticClaimWaitsUntilNineThirtyBeforeFirstRequest() {
+        MutableClock clock = new MutableClock("2026-07-31T09:29:58+08:00");
         List<Instant> callTimes = new ArrayList<>();
         BrandCardClaimClient client = (silkId, xSivir) -> {
             callTimes.add(clock.instant());
@@ -37,15 +37,14 @@ class BrandCardClaimExecutorTest {
                 () -> Duration.ofMillis(100)
         );
 
-        Instant target = Instant.parse("2026-07-31T01:29:55Z");
-        BrandCardClaimExecutionResult result = executor.executeAutomatic(126938104L, "token", null, 12,
-                Duration.ofMillis(100), Duration.ofMillis(400), target);
+        BrandCardClaimExecutionResult result = executor.executeAutomatic(126938104L, "token", 12,
+                Duration.ofMillis(100), Duration.ofMillis(400));
 
         assertFalse(result.success());
         assertEquals(1, result.attempts());
         assertEquals(BrandCardClaimStopReason.SOLD_OUT, result.stopReason());
         assertEquals(callTimes.get(0), result.firstAttemptAt());
-        assertEquals(LocalDateTime.of(2026, 7, 31, 9, 29, 55),
+        assertEquals(LocalDateTime.of(2026, 7, 31, 9, 30),
                 LocalDateTime.ofInstant(callTimes.get(0), ZoneId.of("Asia/Shanghai")));
     }
 
@@ -102,33 +101,6 @@ class BrandCardClaimExecutorTest {
         assertEquals(5, result.attempts());
         assertEquals(Instant.parse("2026-07-31T01:30:00Z"), callTimes.get(0));
         assertEquals(BrandCardClaimStopReason.MAX_ATTEMPTS_REACHED, result.stopReason());
-    }
-
-    @Test
-    void 连续窗口忽略业务结果直到结束时间() {
-        MutableClock clock = new MutableClock("2026-07-31T09:29:20+08:00");
-        List<Instant> callTimes = new ArrayList<>();
-        BrandCardClaimClient client = (silkId, xSivir) -> {
-            callTimes.add(clock.instant());
-            return BrandCardClaimAttemptResult.stop(40026, "还没到开抢时间", BrandCardClaimStopReason.BUSINESS_FAILED);
-        };
-        BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
-                client,
-                clock,
-                duration -> clock.advance(duration),
-                () -> Duration.ofMillis(100)
-        );
-
-        Instant target = Instant.parse("2026-07-31T01:29:27Z");
-        Instant deadline = Instant.parse("2026-07-31T01:29:28Z");
-        BrandCardClaimExecutionResult result = executor.executeContinuous(
-                126938104L, "token", null, 50,
-                Duration.ofMillis(100), Duration.ofMillis(300), target, deadline);
-
-        assertEquals(10, result.attempts());
-        assertEquals(target, result.firstAttemptAt());
-        assertEquals(Instant.parse("2026-07-31T01:29:27.900Z"), callTimes.get(callTimes.size() - 1));
-        assertEquals(BrandCardClaimStopReason.TIME_WINDOW_EXPIRED, result.stopReason());
     }
 
     private static final class MutableClock extends Clock {
