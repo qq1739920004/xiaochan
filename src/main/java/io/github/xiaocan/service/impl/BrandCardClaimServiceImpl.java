@@ -47,10 +47,13 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         implements BrandCardClaimService {
     private static final ZoneId APP_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String LEGACY_DEFAULT_CRON = "58 29 9 * * ?";
-    private static final String DEFAULT_CRON = "55 29 9 * * ?";
+    private static final String PREVIOUS_DEFAULT_CRON = "55 29 9 * * ?";
+    private static final String DEFAULT_CRON = "27 29 9 * * ?";
     private static final int DEFAULT_MAX_ATTEMPTS = 5;
+    private static final int CONTINUOUS_MAX_ATTEMPTS = 400;
     private static final int DEFAULT_MIN_INTERVAL_MS = 100;
-    private static final int DEFAULT_MAX_INTERVAL_MS = 400;
+    private static final int DEFAULT_MAX_INTERVAL_MS = 300;
+    private static final Duration CONTINUOUS_WINDOW = Duration.ofSeconds(34);
     private final Map<Integer, LocalDateTime> lastScheduledRuns = new ConcurrentHashMap<>();
 
     @Resource
@@ -132,8 +135,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         config.setEnabled(dto.getEnabled());
         config.setCron(cron);
         config.setMaxAttempts(DEFAULT_MAX_ATTEMPTS);
-        config.setMinIntervalMs(dto.getMinIntervalMs());
-        config.setMaxIntervalMs(dto.getMaxIntervalMs());
+        config.setMinIntervalMs(DEFAULT_MIN_INTERVAL_MS);
+        config.setMaxIntervalMs(DEFAULT_MAX_INTERVAL_MS);
         if (StringUtils.hasText(dto.getXSivir())) {
             config.setXSivir(dto.getXSivir().trim());
         }
@@ -203,9 +206,9 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                     LocalDateTime previous = lastScheduledRuns.put(config.getId(), now);
                     if (previous == null || !previous.equals(now)) {
                         Instant target = preparationTarget(config, now);
-                        log.info("brand card claim prepared: configId={}, accountId={}, preparationAt={}, targetAt={}, attemptLimit={}, intervalMs={}-{}",
-                                config.getId(), config.getAccountId(), now, target, DEFAULT_MAX_ATTEMPTS,
-                                config.getMinIntervalMs(), config.getMaxIntervalMs());
+                        log.info("大牌券连续测试准备完成：配置={}, 账号={}, 准备时间={}, 开始时间={}, 结束时间={}, 最大次数={}, 间隔={}至{}毫秒",
+                                config.getId(), config.getAccountId(), now, target, target.plus(CONTINUOUS_WINDOW),
+                                CONTINUOUS_MAX_ATTEMPTS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_INTERVAL_MS);
                         taskScheduler.execute(() -> runAutomaticClaim(config, target));
                     }
                 });
@@ -228,7 +231,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private void runAutomaticClaim(BrandCardClaimConfigEntity config, Instant target) {
         Instant preparedAt = Instant.now();
         AtomicInteger requestSequence = new AtomicInteger();
-        log.info("brand card claim worker started: configId={}, accountId={}, targetAt={}, waitMs={}",
+        log.info("大牌券连续测试开始：配置={}, 账号={}, 开始时间={}, 等待={}毫秒",
                 config.getId(), config.getAccountId(), target,
                 Math.max(0, Duration.between(preparedAt, target).toMillis()));
         taskScheduler.execute(XiaochanHttp::warmBrandCardEndpoint);
@@ -236,11 +239,11 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 (silkId, xSivir) -> {
                     int attempt = requestSequence.incrementAndGet();
                     Instant requestStartedAt = Instant.now();
-                    log.info("brand card claim request sent: configId={}, attempt={}, targetOffsetMs={}",
+                    log.info("大牌券请求已发送：配置={}, 次数={}, 相对开始时间偏差={}毫秒",
                             config.getId(), attempt, Duration.between(target, requestStartedAt).toMillis());
                     BrandCardClaimAttemptResult response = XiaochanHttp.grabExtraBrandCard(silkId, xSivir,
                             config.getXVayne());
-                    log.info("brand card claim response received: configId={}, attempt={}, durationMs={}, code={}, reason={}, retryable={}, message={}",
+                    log.info("大牌券响应已收到：配置={}, 次数={}, 耗时={}毫秒, 响应码={}, 结果={}, 可重试={}, 消息={}",
                             config.getId(), attempt, Duration.between(requestStartedAt, Instant.now()).toMillis(),
                             response.code(), response.stopReason(), response.retryable(), safeLogMessage(response.message()));
                     return response;
@@ -250,14 +253,15 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 () -> Duration.ofMillis(ThreadLocalRandom.current().nextLong(
                         config.getMinIntervalMs(), config.getMaxIntervalMs() + 1L))
         );
-        BrandCardClaimExecutionResult result = executor.executeAutomatic(
+        BrandCardClaimExecutionResult result = executor.executeContinuous(
                 config.getSilkId(),
                 config.getXSivir(),
                 config.getXVayne(),
-                DEFAULT_MAX_ATTEMPTS,
-                Duration.ofMillis(config.getMinIntervalMs()),
-                Duration.ofMillis(config.getMaxIntervalMs()),
-                target
+                CONTINUOUS_MAX_ATTEMPTS,
+                Duration.ofMillis(DEFAULT_MIN_INTERVAL_MS),
+                Duration.ofMillis(DEFAULT_MAX_INTERVAL_MS),
+                target,
+                target.plus(CONTINUOUS_WINDOW)
         );
         LocalDateTime startTime = result.firstAttemptAt() == null
                 ? LocalDateTime.ofInstant(target, APP_ZONE)
@@ -265,7 +269,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         saveHistory(config, startTime, result);
         long firstRequestOffsetMs = result.firstAttemptAt() == null ? 0
                 : Duration.between(target, result.firstAttemptAt()).toMillis();
-        log.info("brand card claim completed: configId={}, accountId={}, firstRequestAt={}, targetOffsetMs={}, attempts={}, success={}, code={}, reason={}, durationMs={}, message={}",
+        log.info("大牌券连续测试结束：配置={}, 账号={}, 首次请求={}, 首次偏差={}毫秒, 请求次数={}, 成功={}, 响应码={}, 结束原因={}, 总耗时={}毫秒, 消息={}",
                 config.getId(), config.getAccountId(), result.firstAttemptAt(), firstRequestOffsetMs,
                 result.attempts(), result.success(), result.resultCode(), result.stopReason(),
                 Duration.between(preparedAt, Instant.now()).toMillis(), safeLogMessage(result.resultMessage()));
@@ -307,8 +311,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         vo.setEnabled(config.getEnabled());
         vo.setCron(normalizeCron(config.getCron()));
         vo.setMaxAttempts(DEFAULT_MAX_ATTEMPTS);
-        vo.setMinIntervalMs(config.getMinIntervalMs());
-        vo.setMaxIntervalMs(config.getMaxIntervalMs());
+        vo.setMinIntervalMs(DEFAULT_MIN_INTERVAL_MS);
+        vo.setMaxIntervalMs(DEFAULT_MAX_INTERVAL_MS);
         return vo;
     }
 
@@ -323,7 +327,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     }
 
     private String normalizeCron(String cron) {
-        if (!StringUtils.hasText(cron) || LEGACY_DEFAULT_CRON.equals(cron.trim())) {
+        if (!StringUtils.hasText(cron) || LEGACY_DEFAULT_CRON.equals(cron.trim())
+                || PREVIOUS_DEFAULT_CRON.equals(cron.trim())) {
             return DEFAULT_CRON;
         }
         return cron.trim();
