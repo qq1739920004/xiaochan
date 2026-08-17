@@ -124,10 +124,10 @@ class StoreAutoClaimTaskTest {
     }
 
     @Test
-    void claimsFromTheActivityDiscoveredByTheMonitor() {
+    void claimsEveryActivityAcceptedByTheNotificationMonitor() {
         MonitorConfigEntity config = keywordConfig();
         LocationEntity location = location();
-        StoreInfo discovered = activeStore("测试门店", "store-1", 99, "12.00");
+        StoreInfo discovered = activeStore("通知通过的门店", "store-1", 99, "12.00");
         doAnswer(invocation -> {
             ((Runnable) invocation.getArgument(0)).run();
             return null;

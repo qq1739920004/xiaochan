@@ -38,6 +38,14 @@ class StoreAutoClaimCandidateSelectorTest {
         assertEquals(new BigDecimal("10.00"), selected.getRebatePrice());
     }
 
+    @Test
+    void selectsAnAvailableNotificationWhenItHasNoStandardReviewCondition() {
+        StoreInfo selected = selector.select(List.of(store(1, "40.00"))).orElseThrow();
+
+        assertEquals(1, selected.getRebateCondition());
+        assertEquals(new BigDecimal("40.00"), selected.getRebatePrice());
+    }
+
     private StoreInfo store(int rebateCondition, String rebatePrice) {
         StoreInfo store = new StoreInfo();
         store.setRebateCondition(rebateCondition);

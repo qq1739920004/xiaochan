@@ -58,6 +58,7 @@ public class StoreAutoClaimTask {
     private final Set<String> handledKeys = ConcurrentHashMap.newKeySet();
     private final Set<String> inFlightKeys = ConcurrentHashMap.newKeySet();
     private final Set<String> scheduledKeys = ConcurrentHashMap.newKeySet();
+    private final Set<String> scheduledConfigDays = ConcurrentHashMap.newKeySet();
     private final Map<String, LocalDateTime> lastSkipLogs = new ConcurrentHashMap<>();
 
     @Autowired(required = false)
@@ -84,6 +85,7 @@ public class StoreAutoClaimTask {
         String dateKey = now.toLocalDate().toString();
         handledKeys.removeIf(key -> !key.startsWith(dateKey + ":"));
         scheduledKeys.removeIf(key -> !key.startsWith(dateKey + ":"));
+        scheduledConfigDays.removeIf(key -> !key.startsWith(dateKey + ":"));
         resumeDueSchedules(now);
         List<MonitorConfigEntity> configs = Stream.of(
                         MonitorTypeEnums.STORE_ACTIVITY, MonitorTypeEnums.STORE_KEYWORD)
@@ -118,7 +120,27 @@ public class StoreAutoClaimTask {
         if (!isMonitorWindowActive(config, now) || location == null) return;
         ClaimContext context = readClaimContext(config);
         if (context == null) return;
-        submitCandidate(config, location, stores, context, now);
+        submitNotifiedCandidate(config, location, stores, context, now);
+    }
+
+    private void submitNotifiedCandidate(MonitorConfigEntity config, LocationEntity location,
+                                         List<StoreInfo> stores, ClaimContext context, LocalDateTime now) {
+        List<StoreInfo> notifiedStores = safeList(stores)
+                .filter(store -> store.getLeftNumber() != null && store.getLeftNumber() > 0)
+                .toList();
+        StoreInfo candidate = candidateSelector.select(notifiedStores).orElse(null);
+        if (candidate == null) {
+            logSkip(config, context.keyword(), "通知活动无库存或缺少返利信息", stores, now);
+            return;
+        }
+        LocalDateTime scheduledAt = resolveClaimTime(candidate, now);
+        if (scheduledAt == null) {
+            logSkip(config, context.keyword(), "通知活动已结束或活动时间无法预约", notifiedStores, now);
+            return;
+        }
+        String key = buildKey(config, candidate, scheduledAt.toLocalDate());
+        if (handledKeys.contains(key)) return;
+        scheduleClaim(config, location, context, candidate, scheduledAt, key, now);
     }
 
     private void submitCandidate(MonitorConfigEntity config, LocationEntity location,
@@ -187,32 +209,35 @@ public class StoreAutoClaimTask {
     private boolean reserveSchedule(MonitorConfigEntity config, StoreInfo candidate,
                                     LocalDateTime scheduledAt, String key, LocalDateTime now) {
         if (handledKeys.contains(key) || !scheduledKeys.add(key)) return false;
-        if (scheduleMapper == null) return true;
         LocalDate runDate = scheduledAt.toLocalDate();
+        String configDayKey = runDate + ":" + config.getId();
+        if (!scheduledConfigDays.add(configDayKey)) {
+            scheduledKeys.remove(key);
+            return false;
+        }
+        if (scheduleMapper == null) return true;
         LambdaQueryWrapper<StoreAutoClaimScheduleEntity> wrapper = new LambdaQueryWrapper<StoreAutoClaimScheduleEntity>()
                 .eq(StoreAutoClaimScheduleEntity::getMonitorConfigId, config.getId())
                 .eq(StoreAutoClaimScheduleEntity::getRunDate, runDate)
-                .eq(StoreAutoClaimScheduleEntity::getPromotionId, parseLong(candidate.getPromotionId()))
-                .eq(StoreAutoClaimScheduleEntity::getRebateCondition, candidate.getRebateCondition());
+                .last("limit 1");
         StoreAutoClaimScheduleEntity existing = scheduleMapper.selectOne(wrapper);
-        if (existing != null && !Objects.equals(existing.getStatus(), "PENDING")) {
+        if (existing != null) {
+            scheduledKeys.remove(key);
             return false;
         }
-        if (existing == null) {
-            StoreAutoClaimScheduleEntity entity = new StoreAutoClaimScheduleEntity();
-            entity.setUserId(config.getUserId());
-            entity.setMonitorConfigId(config.getId());
-            entity.setAccountId(readAccountId(config));
-            entity.setRunDate(runDate);
-            entity.setStoreUniqId(candidate.getUniqId() == null ? "" : candidate.getUniqId());
-            entity.setPromotionId(parseLong(candidate.getPromotionId()));
-            entity.setRebateCondition(candidate.getRebateCondition());
-            entity.setScheduledAt(scheduledAt);
-            entity.setStatus("PENDING");
-            entity.setDiscoveredAt(now);
-            entity.setRequestSent(false);
-            scheduleMapper.insert(entity);
-        }
+        StoreAutoClaimScheduleEntity entity = new StoreAutoClaimScheduleEntity();
+        entity.setUserId(config.getUserId());
+        entity.setMonitorConfigId(config.getId());
+        entity.setAccountId(readAccountId(config));
+        entity.setRunDate(runDate);
+        entity.setStoreUniqId(candidate.getUniqId() == null ? "" : candidate.getUniqId());
+        entity.setPromotionId(parseLong(candidate.getPromotionId()));
+        entity.setRebateCondition(candidate.getRebateCondition());
+        entity.setScheduledAt(scheduledAt);
+        entity.setStatus("PENDING");
+        entity.setDiscoveredAt(now);
+        entity.setRequestSent(false);
+        scheduleMapper.insert(entity);
         return true;
     }
 
@@ -227,11 +252,9 @@ public class StoreAutoClaimTask {
             }
             List<StoreInfo> freshStores = xiaoChanService.searchList(
                     context.keyword(), location.getCityCode(), location.getLongitude(), location.getLatitude());
-            List<StoreInfo> matched = matchStores(config, freshStores, context.keyword());
-            if (hasAmbiguousStoreIdentity(config, matched)) {
-                finishWithoutRequest(key, "到点复查发现同名门店歧义");
-                return;
-            }
+            List<StoreInfo> matched = freshStores.stream()
+                    .filter(store -> isSameScheduledActivity(discovered, store))
+                    .toList();
             StoreInfo candidate = candidateSelector.select(matched.stream()
                     .filter(store -> store.getLeftNumber() != null && store.getLeftNumber() > 0)
                     .filter(store -> isActiveAt(store, LocalTime.now(APP_ZONE)))
@@ -245,6 +268,14 @@ public class StoreAutoClaimTask {
             finishWithoutRequest(key, "到点复查失败: " + safeMessage(e));
             log.warn("预约抢单到点复查失败 configId={}, promotionId={}", config.getId(), discovered.getPromotionId(), e);
         }
+    }
+
+    private boolean isSameScheduledActivity(StoreInfo discovered, StoreInfo current) {
+        if (!Objects.equals(parseLong(discovered.getPromotionId()), parseLong(current.getPromotionId()))) {
+            return false;
+        }
+        String discoveredIdentity = storeIdentity(discovered);
+        return discoveredIdentity == null || Objects.equals(discoveredIdentity, storeIdentity(current));
     }
 
     private boolean markScheduleRunning(String key, MonitorConfigEntity config, StoreInfo candidate) {

@@ -11,13 +11,16 @@ public class StoreAutoClaimCandidateSelector {
     public Optional<StoreInfo> select(List<StoreInfo> storeInfos) {
         StoreInfo review = findBest(storeInfos, 2);
         StoreInfo noReview = findBest(storeInfos, 99);
-        if (review == null) {
-            return Optional.ofNullable(noReview);
-        }
-        if (noReview == null || review.getRebatePrice().compareTo(noReview.getRebatePrice()) > 0) {
+        if (review != null && (noReview == null || review.getRebatePrice().compareTo(noReview.getRebatePrice()) > 0)) {
             return Optional.of(review);
         }
-        return Optional.of(noReview);
+        if (noReview != null) {
+            return Optional.of(noReview);
+        }
+        return storeInfos.stream()
+                .filter(store -> store.getLeftNumber() != null && store.getLeftNumber() > 0)
+                .max(Comparator.comparing(StoreInfo::getRebatePrice,
+                        Comparator.nullsFirst(Comparator.naturalOrder())));
     }
 
     private StoreInfo findBest(List<StoreInfo> storeInfos, int rebateCondition) {
