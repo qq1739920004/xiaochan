@@ -125,7 +125,7 @@ public class StoreAutoClaimTask {
                                  List<StoreInfo> stores, ClaimContext context, LocalDateTime now) {
         List<StoreInfo> matchedStores = matchStores(config, stores, context.keyword());
         if (matchedStores.isEmpty()) {
-            logSkip(config, context.keyword(), "没有精确匹配门店或距离不满足", stores, now);
+            logSkip(config, context.keyword(), "门店名称前缀或距离不满足", stores, now);
             return;
         }
         if (hasAmbiguousStoreIdentity(config, matchedStores)) {
@@ -340,8 +340,13 @@ public class StoreAutoClaimTask {
         }
         StoreKeywordExtNotifyConfig ext = JSON.parseObject(config.getExtConfig(), StoreKeywordExtNotifyConfig.class);
         boolean limitDistance = ext == null || ext.getLimitDistance() == null || ext.getLimitDistance();
-        return stores.stream().filter(store -> keyword.equals(store.getName()))
+        return stores.stream().filter(store -> keywordMatchesForAutoClaim(keyword, store.getName()))
                 .filter(store -> !limitDistance || withinDistance(store)).toList();
+    }
+
+    static boolean keywordMatchesForAutoClaim(String keyword, String storeName) {
+        return StringUtils.hasText(keyword) && StringUtils.hasText(storeName)
+                && storeName.trim().startsWith(keyword.trim());
     }
 
     private boolean hasAmbiguousStoreIdentity(MonitorConfigEntity config, List<StoreInfo> stores) {

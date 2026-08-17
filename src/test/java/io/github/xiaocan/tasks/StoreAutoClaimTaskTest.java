@@ -227,13 +227,37 @@ class StoreAutoClaimTaskTest {
                 .thenReturn(List.of(config));
         when(locationService.getById(9L)).thenReturn(location);
         when(xiaoChanService.searchList("测试门店", 310114, "121.4", "31.2"))
-                .thenReturn(List.of(activeStore("测试门店（分店）", "store-2", 99, "20.00")));
+                .thenReturn(List.of(activeStore("其他测试门店", "store-2", 99, "20.00")));
 
         StoreAutoClaimTask task = new StoreAutoClaimTask(
                 configService, locationService, xiaoChanService, claimService, taskScheduler);
         task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
 
         verifyNoInteractions(claimService, taskScheduler);
+    }
+
+    @Test
+    void keywordMonitorClaimsStoreWithBranchSuffixWhenIdentityIsUnambiguous() {
+        MonitorConfigEntity config = keywordConfig();
+        LocationEntity location = location();
+        StoreInfo store = activeStore("测试门店（分店）", "store-1", 99, "20.00");
+        when(configService.list(MonitorTypeEnums.STORE_KEYWORD, MonitorConfigStatusEnums.ENABLE))
+                .thenReturn(List.of(config));
+        when(locationService.getById(9L)).thenReturn(location);
+        when(xiaoChanService.searchList("测试门店", 310114, "121.4", "31.2"))
+                .thenReturn(List.of(store));
+        doAnswer(invocation -> {
+            ((Runnable) invocation.getArgument(0)).run();
+            return null;
+        }).when(taskScheduler).execute(any(Runnable.class));
+        when(claimService.execute(any(), any(), any()))
+                .thenReturn(new StoreAutoClaimResult(1, true, 0, "抢单成功", 888L, StoreAutoClaimStopReason.SUCCESS));
+
+        StoreAutoClaimTask task = new StoreAutoClaimTask(
+                configService, locationService, xiaoChanService, claimService, taskScheduler);
+        task.pollAt(java.time.LocalDateTime.of(2026, 8, 3, 10, 0));
+
+        verify(claimService).execute(config, location, store);
     }
 
     @Test

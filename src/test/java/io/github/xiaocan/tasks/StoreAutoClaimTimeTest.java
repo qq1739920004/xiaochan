@@ -4,6 +4,7 @@ import io.github.xiaocan.model.StoreInfo;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class StoreAutoClaimTimeTest {
 
@@ -26,6 +27,14 @@ class StoreAutoClaimTimeTest {
         beyond.setDistance("5001");
 
         assertTrue(StoreAutoClaimTask.withinDistanceForTest(within));
-        org.junit.jupiter.api.Assertions.assertFalse(StoreAutoClaimTask.withinDistanceForTest(beyond));
+        assertFalse(StoreAutoClaimTask.withinDistanceForTest(beyond));
+    }
+
+    @Test
+    void matchesBranchSuffixButRejectsAStoreWithAnotherPrefix() {
+        assertTrue(StoreAutoClaimTask.keywordMatchesForAutoClaim(
+                "价探PriceTag美妆集合店", "价探PriceTag美妆集合店（嘉定宝龙广场店）"));
+        assertFalse(StoreAutoClaimTask.keywordMatchesForAutoClaim(
+                "价探PriceTag美妆集合店", "另一家价探PriceTag美妆集合店"));
     }
 }
