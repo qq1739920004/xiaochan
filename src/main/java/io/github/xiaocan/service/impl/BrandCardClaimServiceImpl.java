@@ -5,7 +5,9 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import io.github.xiaocan.config.BusinessException;
 import io.github.xiaocan.http.XiaochanHttp;
 import io.github.xiaocan.mapper.BrandCardClaimConfigMapper;
+import io.github.xiaocan.mapper.BrandCardClaimAttemptHistoryMapper;
 import io.github.xiaocan.mapper.BrandCardClaimHistoryMapper;
+import io.github.xiaocan.model.BrandCardClaimAttemptEvent;
 import io.github.xiaocan.mapper.XiaochanAccountMapper;
 import io.github.xiaocan.model.BrandCardClaimAttemptResult;
 import io.github.xiaocan.model.BrandCardClaimExecutionResult;
@@ -13,10 +15,12 @@ import io.github.xiaocan.model.BrandCardClaimStopReason;
 import io.github.xiaocan.model.dto.BrandCardClaimConfigDTO;
 import io.github.xiaocan.model.dto.BrandCardClaimHistoryQueryDTO;
 import io.github.xiaocan.model.entity.BrandCardClaimConfigEntity;
+import io.github.xiaocan.model.entity.BrandCardClaimAttemptHistoryEntity;
 import io.github.xiaocan.model.entity.BrandCardClaimHistoryEntity;
 import io.github.xiaocan.model.entity.UserEntity;
 import io.github.xiaocan.model.entity.XiaochanAccountEntity;
 import io.github.xiaocan.model.vo.BrandCardClaimConfigVO;
+import io.github.xiaocan.model.vo.BrandCardClaimAttemptHistoryVO;
 import io.github.xiaocan.model.vo.BrandCardClaimHistoryVO;
 import io.github.xiaocan.service.BrandCardClaimExecutor;
 import io.github.xiaocan.service.BrandCardClaimService;
@@ -60,6 +64,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private UserService userService;
     @Resource
     private BrandCardClaimHistoryMapper historyMapper;
+    @Resource
+    private BrandCardClaimAttemptHistoryMapper attemptHistoryMapper;
     @Resource
     private XiaochanAccountMapper accountMapper;
     @Resource
@@ -156,13 +162,17 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     public BrandCardClaimExecutionResult claimNow(Integer accountId) {
         BrandCardClaimConfigEntity config = requireCurrentUserConfig(accountId);
         Instant firstAttemptAt = Instant.now();
+        BrandCardClaimHistoryEntity history = createRunningHistory(config,
+                LocalDateTime.ofInstant(firstAttemptAt, APP_ZONE));
         BrandCardClaimAttemptResult attempt = XiaochanHttp.grabExtraBrandCard(
                 config.getSilkId(), config.getXSivir(), config.getXVayne());
+        Instant responseAt = Instant.now();
         BrandCardClaimExecutionResult result = attempt.retryable()
                 ? new BrandCardClaimExecutionResult(1, false, attempt.code(), attempt.message(),
                 BrandCardClaimStopReason.TIME_WINDOW_EXPIRED, firstAttemptAt)
                 : BrandCardClaimExecutionResult.fromAttempt(1, attempt, firstAttemptAt);
-        saveHistory(config, LocalDateTime.ofInstant(firstAttemptAt, APP_ZONE), result);
+        saveAttempt(history, config, new BrandCardClaimAttemptEvent(1, firstAttemptAt, responseAt, attempt));
+        finishHistory(history, result);
         return result;
     }
 
@@ -190,6 +200,20 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                     .orderByDesc(BrandCardClaimHistoryEntity::getId));
         }
         return PageConvertUtil.convert(result, BrandCardClaimHistoryVO.class);
+    }
+
+    @Override
+    public List<BrandCardClaimAttemptHistoryVO> listAttemptHistory(Long historyId) {
+        UserEntity user = userService.getByCurrentRequest();
+        BrandCardClaimHistoryEntity history = historyMapper.selectById(historyId);
+        if (history == null || !user.getId().equals(history.getUserId())) {
+            return List.of();
+        }
+        return attemptHistoryMapper.selectList(
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<BrandCardClaimAttemptHistoryEntity>()
+                                .eq(BrandCardClaimAttemptHistoryEntity::getHistoryId, historyId)
+                                .orderByAsc(BrandCardClaimAttemptHistoryEntity::getSequence))
+                .stream().map(this::toAttemptHistoryVO).toList();
     }
 
     @Override
@@ -235,6 +259,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 config.getId(), config.getAccountId(), target, target.plus(CONTINUOUS_WINDOW),
                 Math.max(0, Duration.between(preparedAt, target).toMillis()));
         taskScheduler.execute(XiaochanHttp::warmBrandCardEndpoint);
+        BrandCardClaimHistoryEntity history = createRunningHistory(config,
+                LocalDateTime.ofInstant(target, APP_ZONE));
         BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
                 (silkId, xSivir) -> {
                     int attempt = requestSequence.incrementAndGet();
@@ -261,12 +287,10 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 Duration.ofMillis(DEFAULT_MIN_INTERVAL_MS),
                 Duration.ofMillis(DEFAULT_MAX_INTERVAL_MS),
                 target,
-                target.plus(CONTINUOUS_WINDOW)
+                target.plus(CONTINUOUS_WINDOW),
+                event -> saveAttempt(history, config, event)
         );
-        LocalDateTime startTime = result.firstAttemptAt() == null
-                ? LocalDateTime.ofInstant(target, APP_ZONE)
-                : LocalDateTime.ofInstant(result.firstAttemptAt(), APP_ZONE);
-        saveHistory(config, startTime, result);
+        finishHistory(history, result);
         long firstRequestOffsetMs = result.firstAttemptAt() == null ? 0
                 : Duration.between(target, result.firstAttemptAt()).toMillis();
         log.info("大牌券连续窗口已结束：配置={}, 账号={}, 首次请求={}, 首次偏差={}毫秒, 请求次数={}, 成功={}, 响应码={}, 结束原因={}, 总耗时={}毫秒, 消息={}",
@@ -342,19 +366,67 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         return normalized.length() <= 240 ? normalized : normalized.substring(0, 240) + "...";
     }
 
-    private void saveHistory(BrandCardClaimConfigEntity config, LocalDateTime startTime,
-                             BrandCardClaimExecutionResult result) {
+    private BrandCardClaimHistoryEntity createRunningHistory(BrandCardClaimConfigEntity config,
+                                                             LocalDateTime initialTime) {
         BrandCardClaimHistoryEntity history = new BrandCardClaimHistoryEntity();
         history.setUserId(config.getUserId());
         history.setConfigId(config.getId());
         history.setAccountId(config.getAccountId());
-        history.setStartTime(startTime);
+        history.setStartTime(initialTime);
+        history.setEndTime(initialTime);
+        history.setRequestCount(0);
+        history.setSuccess(false);
+        history.setStopReason("RUNNING");
+        historyMapper.insert(history);
+        return history;
+    }
+
+    private void finishHistory(BrandCardClaimHistoryEntity history,
+                               BrandCardClaimExecutionResult result) {
+        if (result.firstAttemptAt() != null) {
+            history.setStartTime(LocalDateTime.ofInstant(result.firstAttemptAt(), APP_ZONE));
+        }
         history.setEndTime(LocalDateTime.now(APP_ZONE));
         history.setRequestCount(result.attempts());
         history.setSuccess(result.success());
         history.setResultCode(result.resultCode());
         history.setResultMsg(result.resultMessage());
         history.setStopReason(result.stopReason().name());
-        historyMapper.insert(history);
+        historyMapper.updateById(history);
+    }
+
+    private void saveAttempt(BrandCardClaimHistoryEntity history, BrandCardClaimConfigEntity config,
+                             BrandCardClaimAttemptEvent event) {
+        BrandCardClaimAttemptHistoryEntity attempt = new BrandCardClaimAttemptHistoryEntity();
+        attempt.setHistoryId(history.getId());
+        attempt.setUserId(config.getUserId());
+        attempt.setConfigId(config.getId());
+        attempt.setAccountId(config.getAccountId());
+        attempt.setSequence(event.sequence());
+        attempt.setRequestTime(LocalDateTime.ofInstant(event.requestTime(), APP_ZONE));
+        attempt.setResponseTime(LocalDateTime.ofInstant(event.responseTime(), APP_ZONE));
+        attempt.setDurationMs(Math.max(0, Duration.between(event.requestTime(), event.responseTime()).toMillis()));
+        attempt.setResultCode(event.result().code());
+        attempt.setResultMsg(event.result().message());
+        attempt.setRetryable(event.result().retryable());
+        attempt.setStopReason(event.result().stopReason() == null ? null : event.result().stopReason().name());
+        attempt.setSuccess(event.result().stopReason() == BrandCardClaimStopReason.SUCCESS);
+        attemptHistoryMapper.insert(attempt);
+    }
+
+    private BrandCardClaimAttemptHistoryVO toAttemptHistoryVO(BrandCardClaimAttemptHistoryEntity attempt) {
+        BrandCardClaimAttemptHistoryVO vo = new BrandCardClaimAttemptHistoryVO();
+        vo.setId(attempt.getId());
+        vo.setHistoryId(attempt.getHistoryId());
+        vo.setSequence(attempt.getSequence());
+        vo.setRequestTime(attempt.getRequestTime());
+        vo.setResponseTime(attempt.getResponseTime());
+        vo.setDurationMs(attempt.getDurationMs());
+        vo.setResultCode(attempt.getResultCode());
+        vo.setResultMsg(attempt.getResultMsg());
+        vo.setRetryable(attempt.getRetryable());
+        vo.setStopReason(attempt.getStopReason());
+        vo.setSuccess(attempt.getSuccess());
+        return vo;
     }
 }

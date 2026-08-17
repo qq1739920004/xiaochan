@@ -7,6 +7,7 @@ import io.github.xiaocan.model.dto.BrandCardClaimConfigDTO;
 import io.github.xiaocan.model.dto.BrandCardClaimHistoryQueryDTO;
 import io.github.xiaocan.model.vo.BrandCardClaimConfigVO;
 import io.github.xiaocan.model.vo.BrandCardClaimHistoryVO;
+import io.github.xiaocan.model.vo.BrandCardClaimAttemptHistoryVO;
 import io.github.xiaocan.service.BrandCardClaimService;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
@@ -71,5 +72,11 @@ public class BrandCardClaimController {
             @RequestBody(required = false) BrandCardClaimHistoryQueryDTO dto) {
         return BaseResult.ok(brandCardClaimService.pageHistory(
                 dto == null ? new BrandCardClaimHistoryQueryDTO() : dto, accountId));
+    }
+
+    @GetMapping("/history/{historyId}/attempts")
+    public BaseResult<List<BrandCardClaimAttemptHistoryVO>> listAttemptHistory(
+            @org.springframework.web.bind.annotation.PathVariable Long historyId) {
+        return BaseResult.ok(brandCardClaimService.listAttemptHistory(historyId));
     }
 }

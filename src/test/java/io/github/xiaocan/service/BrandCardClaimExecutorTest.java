@@ -156,6 +156,40 @@ class BrandCardClaimExecutorTest {
         assertEquals(BrandCardClaimStopReason.SOLD_OUT, result.stopReason());
     }
 
+    @Test
+    void continuousWindowReportsEveryAttemptAndTheSuccessfulSequence() {
+        MutableClock clock = new MutableClock("2026-07-31T09:29:55+08:00");
+        AtomicInteger requests = new AtomicInteger();
+        List<Integer> sequences = new ArrayList<>();
+        List<BrandCardClaimStopReason> stopReasons = new ArrayList<>();
+        BrandCardClaimClient client = (silkId, xSivir) -> {
+            if (requests.incrementAndGet() < 3) {
+                return BrandCardClaimAttemptResult.stop(40026, "还没到开抢时间",
+                        BrandCardClaimStopReason.BUSINESS_FAILED);
+            }
+            return BrandCardClaimAttemptResult.stop(0, "领取成功", BrandCardClaimStopReason.SUCCESS);
+        };
+
+        BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
+                client,
+                clock,
+                duration -> clock.advance(duration),
+                () -> Duration.ofMillis(100)
+        );
+
+        BrandCardClaimExecutionResult result = executor.executeContinuous(126938104L, "token", null,
+                100, Duration.ofMillis(100), Duration.ofMillis(300),
+                Instant.parse("2026-07-31T01:29:57Z"), Instant.parse("2026-07-31T01:30:01Z"),
+                event -> {
+                    sequences.add(event.sequence());
+                    stopReasons.add(event.result().stopReason());
+                });
+
+        assertTrue(result.success());
+        assertEquals(List.of(1, 2, 3), sequences);
+        assertEquals(BrandCardClaimStopReason.SUCCESS, stopReasons.get(2));
+    }
+
     private static final class MutableClock extends Clock {
         private final ZoneId zone = ZoneId.of("Asia/Shanghai");
         private Instant instant;

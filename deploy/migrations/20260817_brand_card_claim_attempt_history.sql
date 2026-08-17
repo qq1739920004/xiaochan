@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS `brand_card_claim_attempt_history` (
+    `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `history_id` bigint NOT NULL COMMENT '任务汇总记录ID',
+    `user_id` int NOT NULL COMMENT '项目用户ID',
+    `config_id` int NOT NULL COMMENT '大牌券配置ID',
+    `account_id` int DEFAULT NULL COMMENT '小蚕账号ID',
+    `sequence` int NOT NULL COMMENT '任务内请求序号',
+    `request_time` datetime(3) NOT NULL COMMENT '请求发送时间',
+    `response_time` datetime(3) NOT NULL COMMENT '响应接收时间',
+    `duration_ms` bigint NOT NULL COMMENT '接口耗时毫秒',
+    `result_code` int DEFAULT NULL COMMENT '响应码',
+    `result_msg` varchar(500) DEFAULT NULL COMMENT '响应消息',
+    `retryable` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否可继续请求',
+    `stop_reason` varchar(50) DEFAULT NULL COMMENT '本次停止原因',
+    `success` tinyint(1) NOT NULL DEFAULT 0 COMMENT '本次是否成功',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_brand_card_attempt_history_sequence` (`history_id`, `sequence`),
+    KEY `idx_brand_card_attempt_history_id` (`history_id`),
+    KEY `idx_brand_card_attempt_user_time` (`user_id`, `request_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='自动领取大牌券单次请求明细';

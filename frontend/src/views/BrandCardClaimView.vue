@@ -81,10 +81,27 @@ async function loadHistory() {
       pagination,
     )
     const page = response.data.data
-    history.value = page?.records || []
+    history.value = (page?.records || []).map((item: any) => ({
+      ...item,
+      attempts: [],
+      attemptsLoaded: false,
+      attemptsLoading: false,
+    }))
     pagination.total = Number(page?.total || 0)
   } finally {
     historyLoading.value = false
+  }
+}
+
+async function loadAttempts(row: any) {
+  if (row.attemptsLoaded || row.attemptsLoading) return
+  row.attemptsLoading = true
+  try {
+    const response = await api.get(`/api/brand-card/history/${row.id}/attempts`)
+    row.attempts = response.data.data || []
+    row.attemptsLoaded = true
+  } finally {
+    row.attemptsLoading = false
   }
 }
 
@@ -155,6 +172,7 @@ function statusText(item: any) {
     BUSINESS_FAILED: '业务失败',
     MAX_ATTEMPTS_REACHED: '达到次数上限',
     TIME_WINDOW_EXPIRED: '执行窗口结束',
+    RUNNING: '执行中',
   }
   return labels[item.stopReason] || item.stopReason || '未知'
 }
@@ -274,14 +292,37 @@ onMounted(async () => {
         </div>
         <el-button circle :icon="Refresh" aria-label="刷新执行历史" @click="loadHistory" />
       </div>
-      <el-table v-loading="historyLoading" :data="history" class="history-table" empty-text="暂无执行记录">
+      <el-table v-loading="historyLoading" :data="history" class="history-table" empty-text="暂无执行记录" @expand-change="loadAttempts">
+        <el-table-column type="expand" width="48">
+          <template #default="{ row }">
+            <div class="attempt-history" v-loading="row.attemptsLoading">
+              <el-table :data="row.attempts" size="small" empty-text="此记录生成时尚未保存单次请求明细">
+                <el-table-column prop="sequence" label="请求序号" width="100" align="center" />
+                <el-table-column prop="requestTime" label="发送时间" min-width="190" />
+                <el-table-column label="耗时" width="110" align="right">
+                  <template #default="{ row: attempt }">{{ attempt.durationMs }} ms</template>
+                </el-table-column>
+                <el-table-column prop="resultCode" label="响应码" width="100" align="center" />
+                <el-table-column label="本次结果" min-width="130">
+                  <template #default="{ row: attempt }">
+                    <el-tag :type="statusType(attempt)" effect="plain">{{ statusText(attempt) }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="resultMsg" label="响应消息" min-width="260" show-overflow-tooltip />
+              </el-table>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="startTime" label="开始时间" min-width="170" />
         <el-table-column prop="requestCount" label="请求次数" width="100" align="center" />
+        <el-table-column label="成功请求" width="110" align="center">
+          <template #default="{ row }">{{ row.success ? `第 ${row.requestCount} 次` : '--' }}</template>
+        </el-table-column>
         <el-table-column label="最终状态" min-width="130">
           <template #default="{ row }"><el-tag :type="statusType(row)" effect="plain">{{ statusText(row) }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="resultCode" label="响应码" width="100" align="center" />
-        <el-table-column prop="resultMsg" label="响应消息" min-width="240" show-overflow-tooltip />
+        <el-table-column prop="resultMsg" label="响应消息" min-width="220" show-overflow-tooltip />
       </el-table>
       <div class="pagination-row">
         <span>共 {{ pagination.total }} 条</span>
@@ -331,6 +372,7 @@ h2 { font-size: 17px; margin-bottom: 0; letter-spacing: 0; }
 .history-heading { margin-bottom: 14px; }
 .history-heading .eyebrow { margin-bottom: 4px; }
 .history-table { width: 100%; }
+.attempt-history { padding: 10px 18px 14px 48px; background: #fafcfb; }
 .pagination-row { color: #78848a; font-size: 13px; margin-top: 14px; }
 @media (max-width: 768px) {
   .page-heading { align-items: flex-start; gap: 12px; }

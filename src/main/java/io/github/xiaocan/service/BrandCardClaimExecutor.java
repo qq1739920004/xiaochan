@@ -1,6 +1,7 @@
 package io.github.xiaocan.service;
 
 import io.github.xiaocan.model.BrandCardClaimAttemptResult;
+import io.github.xiaocan.model.BrandCardClaimAttemptEvent;
 import io.github.xiaocan.model.BrandCardClaimExecutionResult;
 import io.github.xiaocan.model.BrandCardClaimStopReason;
 
@@ -11,6 +12,7 @@ import java.time.LocalDate;
 import java.util.EnumSet;
 import java.time.ZoneId;
 import java.util.function.Supplier;
+import java.util.function.Consumer;
 
 public class BrandCardClaimExecutor {
     private static final ZoneId ZONE_ID = ZoneId.of("Asia/Shanghai");
@@ -87,6 +89,16 @@ public class BrandCardClaimExecutor {
                                                              int maxAttempts, Duration minInterval,
                                                              Duration maxInterval, Instant target,
                                                              Instant deadline) {
+        return executeContinuous(silkId, xSivir, xVayne, maxAttempts, minInterval, maxInterval,
+                target, deadline, event -> {
+                });
+    }
+
+    public BrandCardClaimExecutionResult executeContinuous(Long silkId, String xSivir, Long xVayne,
+                                                             int maxAttempts, Duration minInterval,
+                                                             Duration maxInterval, Instant target,
+                                                             Instant deadline,
+                                                             Consumer<BrandCardClaimAttemptEvent> attemptConsumer) {
         waitUntil(target);
         BrandCardClaimAttemptResult lastAttempt = null;
         Instant firstAttemptAt = null;
@@ -94,10 +106,13 @@ public class BrandCardClaimExecutor {
 
         while (attempts < maxAttempts && clock.instant().isBefore(deadline)) {
             attempts++;
+            Instant requestTime = clock.instant();
             if (firstAttemptAt == null) {
-                firstAttemptAt = clock.instant();
+                firstAttemptAt = requestTime;
             }
             lastAttempt = client.claim(silkId, xSivir, xVayne);
+            attemptConsumer.accept(new BrandCardClaimAttemptEvent(
+                    attempts, requestTime, clock.instant(), lastAttempt));
             if (isContinuousWindowTerminal(lastAttempt)) {
                 return BrandCardClaimExecutionResult.fromAttempt(attempts, lastAttempt, firstAttemptAt);
             }

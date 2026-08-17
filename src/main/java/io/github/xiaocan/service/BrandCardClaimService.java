@@ -6,6 +6,7 @@ import io.github.xiaocan.model.dto.BrandCardClaimConfigDTO;
 import io.github.xiaocan.model.dto.BrandCardClaimHistoryQueryDTO;
 import io.github.xiaocan.model.vo.BrandCardClaimConfigVO;
 import io.github.xiaocan.model.vo.BrandCardClaimHistoryVO;
+import io.github.xiaocan.model.vo.BrandCardClaimAttemptHistoryVO;
 
 import java.util.List;
 
@@ -19,5 +20,6 @@ public interface BrandCardClaimService {
     BrandCardClaimExecutionResult claimNow(Integer accountId);
     Page<BrandCardClaimHistoryVO> pageHistory(BrandCardClaimHistoryQueryDTO dto);
     Page<BrandCardClaimHistoryVO> pageHistory(BrandCardClaimHistoryQueryDTO dto, Integer accountId);
+    List<BrandCardClaimAttemptHistoryVO> listAttemptHistory(Long historyId);
     void runScheduledClaims();
 }
