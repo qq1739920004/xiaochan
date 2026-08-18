@@ -90,33 +90,13 @@ public class BrandCardClaimExecutor {
                                                              Duration maxInterval, Instant target,
                                                              Instant deadline) {
         return executeContinuous(silkId, xSivir, xVayne, maxAttempts, minInterval, maxInterval,
-                target, target, deadline, event -> {
+                target, deadline, event -> {
                 });
     }
 
     public BrandCardClaimExecutionResult executeContinuous(Long silkId, String xSivir, Long xVayne,
                                                              int maxAttempts, Duration minInterval,
                                                              Duration maxInterval, Instant target,
-                                                             Instant officialOpening,
-                                                             Instant deadline) {
-        return executeContinuous(silkId, xSivir, xVayne, maxAttempts, minInterval, maxInterval,
-                target, officialOpening, deadline, event -> {
-                });
-    }
-
-    public BrandCardClaimExecutionResult executeContinuous(Long silkId, String xSivir, Long xVayne,
-                                                             int maxAttempts, Duration minInterval,
-                                                             Duration maxInterval, Instant target,
-                                                             Instant deadline,
-                                                             Consumer<BrandCardClaimAttemptEvent> attemptConsumer) {
-        return executeContinuous(silkId, xSivir, xVayne, maxAttempts, minInterval, maxInterval,
-                target, target, deadline, attemptConsumer);
-    }
-
-    public BrandCardClaimExecutionResult executeContinuous(Long silkId, String xSivir, Long xVayne,
-                                                             int maxAttempts, Duration minInterval,
-                                                             Duration maxInterval, Instant target,
-                                                             Instant officialOpening,
                                                              Instant deadline,
                                                              Consumer<BrandCardClaimAttemptEvent> attemptConsumer) {
         waitUntil(target);
@@ -139,9 +119,6 @@ public class BrandCardClaimExecutor {
 
             Duration interval = clamp(intervalSupplier.get(), minInterval, maxInterval);
             Instant nextAttemptAt = clock.instant().plus(interval);
-            if (clock.instant().isBefore(officialOpening) && nextAttemptAt.isAfter(officialOpening)) {
-                nextAttemptAt = officialOpening;
-            }
             if (!nextAttemptAt.isBefore(deadline)) {
                 break;
             }
