@@ -138,7 +138,7 @@ class BrandCardClaimExecutorTest {
         AtomicInteger attempts = new AtomicInteger();
         BrandCardClaimClient client = (silkId, xSivir) -> {
             callTimes.add(clock.instant());
-            if (attempts.incrementAndGet() == 1) {
+            if (attempts.incrementAndGet() < 3) {
                 clock.advance(Duration.ofMillis(30));
                 return BrandCardClaimAttemptResult.stop(40026, "还没到开抢时间，再等等",
                         BrandCardClaimStopReason.BUSINESS_FAILED);
@@ -152,15 +152,19 @@ class BrandCardClaimExecutorTest {
                 duration -> clock.advance(duration),
                 () -> Duration.ofMillis(200)
         );
-        Instant start = Instant.parse("2026-07-31T01:29:57Z");
+        Instant start = Instant.parse("2026-07-31T01:29:58Z");
         Instant officialOpening = Instant.parse("2026-07-31T01:30:00Z");
         Instant deadline = Instant.parse("2026-07-31T01:30:01Z");
 
         BrandCardClaimExecutionResult result = executor.executeContinuous(126938104L, "token", null,
-                100, Duration.ofMillis(100), Duration.ofMillis(300), start, officialOpening, deadline);
+                100, Duration.ofMillis(50), Duration.ofMillis(100), start, officialOpening, deadline);
 
         assertTrue(result.success());
-        assertEquals(List.of(Instant.parse("2026-07-31T01:29:59.780Z"), officialOpening), callTimes);
+        assertEquals(List.of(
+                Instant.parse("2026-07-31T01:29:59.780Z"),
+                Instant.parse("2026-07-31T01:29:59.910Z"),
+                officialOpening
+        ), callTimes);
     }
 
     @Test

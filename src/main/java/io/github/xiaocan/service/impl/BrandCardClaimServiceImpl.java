@@ -54,11 +54,11 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private static final String TEST_DEFAULT_CRON = "27 29 9 * * ?";
     private static final String DEFAULT_CRON = "55 29 9 * * ?";
     private static final int DEFAULT_MAX_ATTEMPTS = 5;
-    private static final int DEFAULT_MIN_INTERVAL_MS = 100;
-    private static final int DEFAULT_MAX_INTERVAL_MS = 300;
+    private static final int DEFAULT_MIN_INTERVAL_MS = 50;
+    private static final int DEFAULT_MAX_INTERVAL_MS = 100;
     private static final int CONTINUOUS_MAX_ATTEMPTS = 100;
-    private static final Duration CONTINUOUS_WINDOW = Duration.ofSeconds(4);
-    private static final Duration OPENING_OFFSET = Duration.ofSeconds(3);
+    private static final Duration CONTINUOUS_WINDOW = Duration.ofSeconds(3);
+    private static final Duration OPENING_OFFSET = Duration.ofSeconds(2);
     private static final Duration OPENING_TIMEOUT_EARLY_MARGIN = Duration.ofMillis(50);
     private static final int OPENING_REQUEST_TIMEOUT_MS = 350;
     private final Map<Integer, LocalDateTime> lastScheduledRuns = new ConcurrentHashMap<>();
@@ -251,7 +251,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private Instant preparationTarget(BrandCardClaimConfigEntity config, LocalDateTime preparationTime) {
         String cron = normalizeCron(config.getCron());
         LocalDateTime scheduled = CronExpression.parse(cron).next(preparationTime.minusSeconds(1));
-        return (scheduled == null ? preparationTime.plusSeconds(2) : scheduled.plusSeconds(2))
+        return (scheduled == null ? preparationTime.plusSeconds(3) : scheduled.plusSeconds(3))
                 .atZone(APP_ZONE).toInstant();
     }
 
