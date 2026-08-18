@@ -88,12 +88,17 @@ public class XiaochanHttp {
     }
 
     public static BrandCardClaimAttemptResult grabExtraBrandCard(Long silkId, String xSivir, Long xVayne) {
+        return grabExtraBrandCard(silkId, xSivir, xVayne, 1200);
+    }
+
+    public static BrandCardClaimAttemptResult grabExtraBrandCard(Long silkId, String xSivir, Long xVayne,
+                                                                   int timeoutMs) {
         BrandCardRequestParts request = buildBrandCardClaimRequestParts(silkId, xSivir, xVayne);
         HttpResponse response = null;
         try {
             response = HttpUtil.createPost(BASE_URL)
                     .headerMap(request.headers(), true)
-                    .timeout(1200)
+                    .timeout(Math.max(1, timeoutMs))
                     .body(request.body())
                     .execute();
             if (!response.isOk()) {

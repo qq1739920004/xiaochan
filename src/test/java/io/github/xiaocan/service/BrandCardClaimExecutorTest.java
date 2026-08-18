@@ -132,6 +132,38 @@ class BrandCardClaimExecutorTest {
     }
 
     @Test
+    void continuousWindowAlignsTheCrossBoundaryRetryToTheOfficialOpeningTime() {
+        MutableClock clock = new MutableClock("2026-07-31T09:29:59.780+08:00");
+        List<Instant> callTimes = new ArrayList<>();
+        AtomicInteger attempts = new AtomicInteger();
+        BrandCardClaimClient client = (silkId, xSivir) -> {
+            callTimes.add(clock.instant());
+            if (attempts.incrementAndGet() == 1) {
+                clock.advance(Duration.ofMillis(30));
+                return BrandCardClaimAttemptResult.stop(40026, "还没到开抢时间，再等等",
+                        BrandCardClaimStopReason.BUSINESS_FAILED);
+            }
+            return BrandCardClaimAttemptResult.stop(0, "领取成功", BrandCardClaimStopReason.SUCCESS);
+        };
+
+        BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
+                client,
+                clock,
+                duration -> clock.advance(duration),
+                () -> Duration.ofMillis(200)
+        );
+        Instant start = Instant.parse("2026-07-31T01:29:57Z");
+        Instant officialOpening = Instant.parse("2026-07-31T01:30:00Z");
+        Instant deadline = Instant.parse("2026-07-31T01:30:01Z");
+
+        BrandCardClaimExecutionResult result = executor.executeContinuous(126938104L, "token", null,
+                100, Duration.ofMillis(100), Duration.ofMillis(300), start, officialOpening, deadline);
+
+        assertTrue(result.success());
+        assertEquals(List.of(Instant.parse("2026-07-31T01:29:59.780Z"), officialOpening), callTimes);
+    }
+
+    @Test
     void continuousWindowStopsImmediatelyWhenSoldOut() {
         MutableClock clock = new MutableClock("2026-07-31T09:29:55+08:00");
         AtomicInteger attempts = new AtomicInteger();

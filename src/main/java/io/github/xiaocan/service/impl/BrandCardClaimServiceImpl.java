@@ -58,6 +58,9 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private static final int DEFAULT_MAX_INTERVAL_MS = 300;
     private static final int CONTINUOUS_MAX_ATTEMPTS = 100;
     private static final Duration CONTINUOUS_WINDOW = Duration.ofSeconds(4);
+    private static final Duration OPENING_OFFSET = Duration.ofSeconds(3);
+    private static final Duration OPENING_TIMEOUT_EARLY_MARGIN = Duration.ofMillis(50);
+    private static final int OPENING_REQUEST_TIMEOUT_MS = 350;
     private final Map<Integer, LocalDateTime> lastScheduledRuns = new ConcurrentHashMap<>();
 
     @Resource
@@ -254,9 +257,10 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
 
     private void runAutomaticClaim(BrandCardClaimConfigEntity config, Instant target) {
         Instant preparedAt = Instant.now();
+        Instant officialOpening = target.plus(OPENING_OFFSET);
         AtomicInteger requestSequence = new AtomicInteger();
-        log.info("大牌券连续窗口已启动：配置={}, 账号={}, 开始时间={}, 结束时间={}, 等待={}毫秒",
-                config.getId(), config.getAccountId(), target, target.plus(CONTINUOUS_WINDOW),
+        log.info("大牌券连续窗口已启动：配置={}, 账号={}, 窗口开始={}, 正式开抢={}, 结束时间={}, 等待={}毫秒",
+                config.getId(), config.getAccountId(), target, officialOpening, target.plus(CONTINUOUS_WINDOW),
                 Math.max(0, Duration.between(preparedAt, target).toMillis()));
         taskScheduler.execute(XiaochanHttp::warmBrandCardEndpoint);
         BrandCardClaimHistoryEntity history = createRunningHistory(config,
@@ -265,10 +269,13 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 (silkId, xSivir) -> {
                     int attempt = requestSequence.incrementAndGet();
                     Instant requestStartedAt = Instant.now();
-                    log.info("大牌券请求已发送：配置={}, 次数={}, 相对目标时间偏差={}毫秒",
-                            config.getId(), attempt, Duration.between(target, requestStartedAt).toMillis());
+                    int timeoutMs = requestStartedAt.isBefore(officialOpening.minus(OPENING_TIMEOUT_EARLY_MARGIN))
+                            ? 1200 : OPENING_REQUEST_TIMEOUT_MS;
+                    log.info("大牌券请求已发送：配置={}, 次数={}, 相对窗口开始偏差={}毫秒, 相对正式开抢偏差={}毫秒, 超时={}毫秒",
+                            config.getId(), attempt, Duration.between(target, requestStartedAt).toMillis(),
+                            Duration.between(officialOpening, requestStartedAt).toMillis(), timeoutMs);
                     BrandCardClaimAttemptResult response = XiaochanHttp.grabExtraBrandCard(silkId, xSivir,
-                            config.getXVayne());
+                            config.getXVayne(), timeoutMs);
                     log.info("大牌券响应已收到：配置={}, 次数={}, 耗时={}毫秒, 响应码={}, 原因={}, 可重试={}, 消息={}",
                             config.getId(), attempt, Duration.between(requestStartedAt, Instant.now()).toMillis(),
                             response.code(), response.stopReason(), response.retryable(), safeLogMessage(response.message()));
@@ -287,6 +294,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 Duration.ofMillis(DEFAULT_MIN_INTERVAL_MS),
                 Duration.ofMillis(DEFAULT_MAX_INTERVAL_MS),
                 target,
+                officialOpening,
                 target.plus(CONTINUOUS_WINDOW),
                 event -> saveAttempt(history, config, event)
         );
