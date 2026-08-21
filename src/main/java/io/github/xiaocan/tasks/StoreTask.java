@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.net.SocketTimeoutException;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -125,7 +126,33 @@ public class StoreTask extends BaseTask {
             StoreKeywordExtNotifyConfig storeKeywordExtNotifyConfig = JSON.parseObject(notifyConfig.getExtConfig(), StoreKeywordExtNotifyConfig.class);
             keyword = storeKeywordExtNotifyConfig.getKeyword();
         }
-        return xiaoChanService.searchList(keyword, location.getCityCode(), location.getLongitude(), location.getLatitude());
+        try {
+            return xiaoChanService.searchList(keyword, location.getCityCode(), location.getLongitude(), location.getLatitude());
+        } catch (Exception firstError) {
+            if (!isReadTimeout(firstError)) {
+                throw firstError;
+            }
+            log.warn("门店查询失败，200毫秒后重试一次 configId={}, keyword={}, message={}",
+                    notifyConfig.getId(), keyword, firstError.getMessage());
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("门店查询重试被中断", interrupted);
+            }
+            return xiaoChanService.searchList(keyword, location.getCityCode(), location.getLongitude(), location.getLatitude());
+        }
+    }
+
+    private boolean isReadTimeout(Exception error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof SocketTimeoutException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     /**

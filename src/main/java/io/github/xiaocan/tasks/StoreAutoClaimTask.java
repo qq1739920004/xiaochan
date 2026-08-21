@@ -123,6 +123,9 @@ public class StoreAutoClaimTask {
         submitNotifiedCandidate(config, location, stores, context, now);
     }
 
+    /**
+     * 通知任务已按该监控配置完成关键词、距离和库存筛选，这里不再用严格门店名二次拦截。
+     */
     private void submitNotifiedCandidate(MonitorConfigEntity config, LocationEntity location,
                                          List<StoreInfo> stores, ClaimContext context, LocalDateTime now) {
         List<StoreInfo> notifiedStores = safeList(stores)
