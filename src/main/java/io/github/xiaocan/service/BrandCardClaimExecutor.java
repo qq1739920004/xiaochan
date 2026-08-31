@@ -11,6 +11,11 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.EnumSet;
 import java.time.ZoneId;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Supplier;
 import java.util.function.Consumer;
 
@@ -136,6 +141,98 @@ public class BrandCardClaimExecutor {
                 reason,
                 firstAttemptAt
         );
+    }
+
+    public BrandCardClaimExecutionResult executeConcurrentContinuous(Long silkId, String xSivir, Long xVayne,
+                                                                       Duration interval, int maxInFlight,
+                                                                       Instant target, Instant deadline,
+                                                                       Consumer<BrandCardClaimAttemptEvent> attemptConsumer) {
+        waitUntil(target);
+        int concurrency = Math.max(1, maxInFlight);
+        ExecutorService workers = Executors.newFixedThreadPool(concurrency);
+        CompletionService<BrandCardClaimAttemptEvent> completions = new ExecutorCompletionService<>(workers);
+        BrandCardClaimAttemptResult lastAttempt = null;
+        BrandCardClaimAttemptResult terminalAttempt = null;
+        Instant firstAttemptAt = null;
+        Instant nextRequestAt = target;
+        int attempts = 0;
+        int inFlight = 0;
+        boolean stopSubmitting = false;
+
+        try {
+            while (inFlight > 0 || (!stopSubmitting && clock.instant().isBefore(deadline))) {
+                Future<BrandCardClaimAttemptEvent> completed;
+                while ((completed = completions.poll()) != null) {
+                    inFlight--;
+                    BrandCardClaimAttemptEvent event = completed.get();
+                    attemptConsumer.accept(event);
+                    lastAttempt = event.result();
+                    if (terminalAttempt == null && isContinuousWindowTerminal(event.result())) {
+                        terminalAttempt = event.result();
+                        stopSubmitting = true;
+                    }
+                }
+
+                if (stopSubmitting) {
+                    if (inFlight > 0) {
+                        sleep(Duration.ofMillis(1));
+                    }
+                    continue;
+                }
+
+                Instant now = clock.instant();
+                if (now.isBefore(deadline) && inFlight < concurrency && !now.isBefore(nextRequestAt)) {
+                    int sequence = ++attempts;
+                    if (firstAttemptAt == null) {
+                        firstAttemptAt = now;
+                    }
+                    completions.submit(() -> executeAttempt(sequence, silkId, xSivir, xVayne));
+                    inFlight++;
+                    nextRequestAt = now.plus(interval);
+                    continue;
+                }
+
+                if (inFlight > 0) {
+                    sleep(Duration.ofMillis(1));
+                } else if (now.isBefore(deadline)) {
+                    Instant nextWakeUp = nextRequestAt.isBefore(deadline) ? nextRequestAt : deadline;
+                    sleep(Duration.between(now, nextWakeUp));
+                }
+            }
+        } catch (Exception e) {
+            BrandCardClaimAttemptResult failed = BrandCardClaimAttemptResult.retryable(null,
+                    "请求调度异常: " + e.getMessage());
+            return new BrandCardClaimExecutionResult(attempts, false, failed.code(), failed.message(),
+                    BrandCardClaimStopReason.TIME_WINDOW_EXPIRED, firstAttemptAt);
+        } finally {
+            workers.shutdown();
+        }
+
+        if (terminalAttempt != null) {
+            return BrandCardClaimExecutionResult.fromAttempt(attempts, terminalAttempt, firstAttemptAt);
+        }
+        BrandCardClaimStopReason reason = clock.instant().isBefore(deadline)
+                ? BrandCardClaimStopReason.MAX_ATTEMPTS_REACHED
+                : BrandCardClaimStopReason.TIME_WINDOW_EXPIRED;
+        return new BrandCardClaimExecutionResult(
+                attempts,
+                false,
+                lastAttempt == null ? null : lastAttempt.code(),
+                lastAttempt == null ? "未进入连续领取窗口" : lastAttempt.message(),
+                reason,
+                firstAttemptAt
+        );
+    }
+
+    private BrandCardClaimAttemptEvent executeAttempt(int sequence, Long silkId, String xSivir, Long xVayne) {
+        Instant requestTime = clock.instant();
+        BrandCardClaimAttemptResult result;
+        try {
+            result = client.claim(silkId, xSivir, xVayne);
+        } catch (RuntimeException e) {
+            result = BrandCardClaimAttemptResult.retryable(null, "请求异常: " + e.getMessage());
+        }
+        return new BrandCardClaimAttemptEvent(sequence, requestTime, clock.instant(), result);
     }
 
     private boolean isContinuousWindowTerminal(BrandCardClaimAttemptResult attempt) {

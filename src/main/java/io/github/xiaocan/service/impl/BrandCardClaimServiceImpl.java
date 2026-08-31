@@ -40,9 +40,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.List;
 
 @Slf4j
@@ -52,12 +50,13 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private static final ZoneId APP_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String LEGACY_DEFAULT_CRON = "58 29 9 * * ?";
     private static final String TEST_DEFAULT_CRON = "27 29 9 * * ?";
-    private static final String DEFAULT_CRON = "55 29 9 * * ?";
+    private static final String PREVIOUS_DEFAULT_CRON = "55 29 9 * * ?";
+    private static final String DEFAULT_CRON = "56 29 9 * * ?";
     private static final int DEFAULT_MAX_ATTEMPTS = 5;
-    private static final int DEFAULT_MIN_INTERVAL_MS = 100;
-    private static final int DEFAULT_MAX_INTERVAL_MS = 300;
-    private static final int CONTINUOUS_MAX_ATTEMPTS = 100;
-    private static final Duration CONTINUOUS_WINDOW = Duration.ofSeconds(3);
+    private static final int DEFAULT_MIN_INTERVAL_MS = 20;
+    private static final int DEFAULT_MAX_INTERVAL_MS = 20;
+    private static final int CONTINUOUS_MAX_IN_FLIGHT = 5;
+    private static final Duration CONTINUOUS_WINDOW = Duration.ofSeconds(2);
     private static final int CONTINUOUS_REQUEST_TIMEOUT_MS = 1000;
     private final Map<Integer, LocalDateTime> lastScheduledRuns = new ConcurrentHashMap<>();
 
@@ -231,9 +230,9 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                     LocalDateTime previous = lastScheduledRuns.put(config.getId(), now);
                     if (previous == null || !previous.equals(now)) {
                         Instant target = preparationTarget(config, now);
-                        log.info("大牌券连续窗口已准备：配置={}, 账号={}, 预备时间={}, 开始时间={}, 结束时间={}, 安全上限={}, 间隔={}至{}毫秒",
+                        log.info("大牌券连续窗口已准备：配置={}, 账号={}, 预备时间={}, 开始时间={}, 结束时间={}, 最大并发={}, 最快间隔={}毫秒",
                                 config.getId(), config.getAccountId(), now, target, target.plus(CONTINUOUS_WINDOW),
-                                CONTINUOUS_MAX_ATTEMPTS, DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_INTERVAL_MS);
+                                CONTINUOUS_MAX_IN_FLIGHT, DEFAULT_MIN_INTERVAL_MS);
                         taskScheduler.execute(() -> runAutomaticClaim(config, target));
                     }
                 });
@@ -255,7 +254,6 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
 
     private void runAutomaticClaim(BrandCardClaimConfigEntity config, Instant target) {
         Instant preparedAt = Instant.now();
-        AtomicInteger requestSequence = new AtomicInteger();
         log.info("大牌券连续窗口已启动：配置={}, 账号={}, 窗口开始={}, 结束时间={}, 等待={}毫秒",
                 config.getId(), config.getAccountId(), target, target.plus(CONTINUOUS_WINDOW),
                 Math.max(0, Duration.between(preparedAt, target).toMillis()));
@@ -264,30 +262,27 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 LocalDateTime.ofInstant(target, APP_ZONE));
         BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
                 (silkId, xSivir) -> {
-                    int attempt = requestSequence.incrementAndGet();
                     Instant requestStartedAt = Instant.now();
-                    log.info("大牌券请求已发送：配置={}, 次数={}, 相对窗口开始偏差={}毫秒, 超时={}毫秒",
-                            config.getId(), attempt, Duration.between(target, requestStartedAt).toMillis(),
+                    log.info("大牌券请求已发送：配置={}, 相对窗口开始偏差={}毫秒, 超时={}毫秒",
+                            config.getId(), Duration.between(target, requestStartedAt).toMillis(),
                             CONTINUOUS_REQUEST_TIMEOUT_MS);
                     BrandCardClaimAttemptResult response = XiaochanHttp.grabExtraBrandCard(silkId, xSivir,
                             config.getXVayne(), CONTINUOUS_REQUEST_TIMEOUT_MS);
-                    log.info("大牌券响应已收到：配置={}, 次数={}, 耗时={}毫秒, 响应码={}, 原因={}, 可重试={}, 消息={}",
-                            config.getId(), attempt, Duration.between(requestStartedAt, Instant.now()).toMillis(),
+                    log.info("大牌券响应已收到：配置={}, 耗时={}毫秒, 响应码={}, 原因={}, 可重试={}, 消息={}",
+                            config.getId(), Duration.between(requestStartedAt, Instant.now()).toMillis(),
                             response.code(), response.stopReason(), response.retryable(), safeLogMessage(response.message()));
                     return response;
                 },
                 Clock.system(APP_ZONE),
                 duration -> TimeUnit.NANOSECONDS.sleep(duration.toNanos()),
-                () -> Duration.ofMillis(ThreadLocalRandom.current().nextLong(
-                        DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_INTERVAL_MS + 1L))
+                () -> Duration.ofMillis(DEFAULT_MIN_INTERVAL_MS)
         );
-        BrandCardClaimExecutionResult result = executor.executeContinuous(
+        BrandCardClaimExecutionResult result = executor.executeConcurrentContinuous(
                 config.getSilkId(),
                 config.getXSivir(),
                 config.getXVayne(),
-                CONTINUOUS_MAX_ATTEMPTS,
                 Duration.ofMillis(DEFAULT_MIN_INTERVAL_MS),
-                Duration.ofMillis(DEFAULT_MAX_INTERVAL_MS),
+                CONTINUOUS_MAX_IN_FLIGHT,
                 target,
                 target.plus(CONTINUOUS_WINDOW),
                 event -> saveAttempt(history, config, event)
@@ -354,7 +349,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
 
     private String normalizeCron(String cron) {
         if (!StringUtils.hasText(cron) || LEGACY_DEFAULT_CRON.equals(cron.trim())
-                || TEST_DEFAULT_CRON.equals(cron.trim())) {
+                || TEST_DEFAULT_CRON.equals(cron.trim()) || PREVIOUS_DEFAULT_CRON.equals(cron.trim())) {
             return DEFAULT_CRON;
         }
         return cron.trim();

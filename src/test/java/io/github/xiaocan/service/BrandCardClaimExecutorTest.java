@@ -13,6 +13,10 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -222,6 +226,57 @@ class BrandCardClaimExecutorTest {
         assertTrue(result.success());
         assertEquals(List.of(1, 2, 3), sequences);
         assertEquals(BrandCardClaimStopReason.SUCCESS, stopReasons.get(2));
+    }
+
+    @Test
+    void concurrentWindowLimitsInFlightRequestsToFiveAndStopsOnSuccess() throws Exception {
+        AtomicInteger started = new AtomicInteger();
+        AtomicInteger inFlight = new AtomicInteger();
+        AtomicInteger peakInFlight = new AtomicInteger();
+        CountDownLatch fiveRequestsStarted = new CountDownLatch(5);
+        CountDownLatch allowResponses = new CountDownLatch(1);
+        BrandCardClaimClient client = (silkId, xSivir) -> {
+            int sequence = started.incrementAndGet();
+            int currentInFlight = inFlight.incrementAndGet();
+            peakInFlight.accumulateAndGet(currentInFlight, Math::max);
+            fiveRequestsStarted.countDown();
+            try {
+                allowResponses.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                inFlight.decrementAndGet();
+            }
+            return sequence == 1
+                    ? BrandCardClaimAttemptResult.stop(0, "领取成功", BrandCardClaimStopReason.SUCCESS)
+                    : BrandCardClaimAttemptResult.retryable(null, "请继续");
+        };
+        BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
+                client,
+                Clock.systemUTC(),
+                duration -> java.util.concurrent.TimeUnit.NANOSECONDS.sleep(duration.toNanos()),
+                () -> Duration.ofMillis(20)
+        );
+        Instant target = Instant.now().plusMillis(20);
+        Instant deadline = target.plusMillis(400);
+        ExecutorService runner = Executors.newSingleThreadExecutor();
+        try {
+            Future<BrandCardClaimExecutionResult> execution = runner.submit(() ->
+                    executor.executeConcurrentContinuous(126938104L, "token", null,
+                            Duration.ofMillis(20), 5, target, deadline, event -> {
+                            }));
+
+            assertTrue(fiveRequestsStarted.await(1, java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(5, peakInFlight.get());
+            allowResponses.countDown();
+
+            BrandCardClaimExecutionResult result = execution.get(2, java.util.concurrent.TimeUnit.SECONDS);
+            assertTrue(result.success());
+            assertTrue(peakInFlight.get() <= 5);
+        } finally {
+            allowResponses.countDown();
+            runner.shutdownNow();
+        }
     }
 
     private static final class MutableClock extends Clock {
