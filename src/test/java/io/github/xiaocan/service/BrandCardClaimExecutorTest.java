@@ -3,6 +3,7 @@ package io.github.xiaocan.service;
 import io.github.xiaocan.model.BrandCardClaimAttemptResult;
 import io.github.xiaocan.model.BrandCardClaimExecutionResult;
 import io.github.xiaocan.model.BrandCardClaimStopReason;
+import io.github.xiaocan.service.impl.BrandCardClaimServiceImpl;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -23,6 +24,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BrandCardClaimExecutorTest {
+
+    @Test
+    void defaultConcurrentClaimIntervalUsesOneToTenMilliseconds() throws Exception {
+        assertEquals(1, privateIntConstant("DEFAULT_MIN_INTERVAL_MS"));
+        assertEquals(10, privateIntConstant("DEFAULT_MAX_INTERVAL_MS"));
+    }
 
     @Test
     void automaticClaimWaitsUntilNineThirtyBeforeFirstRequest() {
@@ -305,5 +312,11 @@ class BrandCardClaimExecutorTest {
         public Instant instant() {
             return instant;
         }
+    }
+
+    private int privateIntConstant(String name) throws Exception {
+        java.lang.reflect.Field field = BrandCardClaimServiceImpl.class.getDeclaredField(name);
+        field.setAccessible(true);
+        return field.getInt(null);
     }
 }

@@ -40,6 +40,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.List;
 
@@ -53,8 +54,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private static final String PREVIOUS_DEFAULT_CRON = "55 29 9 * * ?";
     private static final String DEFAULT_CRON = "56 29 9 * * ?";
     private static final int DEFAULT_MAX_ATTEMPTS = 5;
-    private static final int DEFAULT_MIN_INTERVAL_MS = 20;
-    private static final int DEFAULT_MAX_INTERVAL_MS = 20;
+    private static final int DEFAULT_MIN_INTERVAL_MS = 1;
+    private static final int DEFAULT_MAX_INTERVAL_MS = 10;
     private static final int CONTINUOUS_MAX_IN_FLIGHT = 5;
     private static final Duration CONTINUOUS_WINDOW = Duration.ofSeconds(2);
     private static final int CONTINUOUS_REQUEST_TIMEOUT_MS = 1000;
@@ -275,7 +276,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 },
                 Clock.system(APP_ZONE),
                 duration -> TimeUnit.NANOSECONDS.sleep(duration.toNanos()),
-                () -> Duration.ofMillis(DEFAULT_MIN_INTERVAL_MS)
+                () -> Duration.ofMillis(ThreadLocalRandom.current().nextLong(
+                        DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_INTERVAL_MS + 1L))
         );
         BrandCardClaimExecutionResult result = executor.executeConcurrentContinuous(
                 config.getSilkId(),
