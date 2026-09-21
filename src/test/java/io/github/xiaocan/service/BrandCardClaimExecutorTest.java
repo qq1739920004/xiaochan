@@ -1,6 +1,7 @@
 package io.github.xiaocan.service;
 
 import io.github.xiaocan.model.BrandCardClaimAttemptResult;
+import io.github.xiaocan.model.BrandCardClaimAttemptEvent;
 import io.github.xiaocan.model.BrandCardClaimExecutionResult;
 import io.github.xiaocan.model.BrandCardClaimStopReason;
 import io.github.xiaocan.service.impl.BrandCardClaimServiceImpl;
@@ -284,6 +285,30 @@ class BrandCardClaimExecutorTest {
             allowResponses.countDown();
             runner.shutdownNow();
         }
+    }
+
+    @Test
+    void 并发连续领取使用配置的最大次数和随机间隔() throws Exception {
+        MutableClock clock = new MutableClock("2026-07-31T09:29:59+08:00");
+        List<BrandCardClaimAttemptEvent> events = new ArrayList<>();
+        BrandCardClaimClient client = (silkId, xSivir) -> BrandCardClaimAttemptResult.retryable(null, "请继续");
+        BrandCardClaimExecutor executor = new BrandCardClaimExecutor(
+                client,
+                clock,
+                duration -> clock.advance(duration),
+                () -> Duration.ofMillis(10)
+        );
+
+        BrandCardClaimExecutionResult result = executor.executeConcurrentContinuous(
+                126938104L, "token", null, 3, 1,
+                Instant.parse("2026-07-31T01:29:59Z"),
+                Instant.parse("2026-07-31T01:30:01Z"), events::add);
+
+        assertEquals(3, result.attempts());
+        assertEquals(BrandCardClaimStopReason.MAX_ATTEMPTS_REACHED, result.stopReason());
+        assertEquals(List.of(1, 2, 3), events.stream().map(BrandCardClaimAttemptEvent::sequence).toList());
+        assertTrue(Duration.between(events.get(0).requestTime(), events.get(1).requestTime())
+                .compareTo(Duration.ofMillis(10)) >= 0);
     }
 
     private static final class MutableClock extends Clock {

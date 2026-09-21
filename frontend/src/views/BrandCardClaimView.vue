@@ -29,17 +29,26 @@ const form = reactive({
   xVayne: null as number | null,
   xSivir: '',
   enabled: false,
-  cron: '55 29 9 * * ?',
-  maxAttempts: 5,
-  minIntervalMs: 100,
-  maxIntervalMs: 300,
+  cron: '56 29 9 * * ?',
+  maxAttempts: 100,
+  minIntervalMs: 1,
+  maxIntervalMs: 10,
+  startDelayMs: 3000,
+  windowDurationMs: 2000,
+  maxInFlight: 5,
+  requestTimeoutMs: 1000,
 })
 
 const rules = {
   silkId: [{ required: true, message: '请输入 silk_id', trigger: 'blur' }],
   xVayne: [{ required: true, message: '请输入 X-Vayne', trigger: 'blur' }],
+  maxAttempts: [{ required: true, message: '请输入最大请求次数', trigger: 'blur' }],
   minIntervalMs: [{ required: true, message: '请输入最小间隔', trigger: 'blur' }],
   maxIntervalMs: [{ required: true, message: '请输入最大间隔', trigger: 'blur' }],
+  startDelayMs: [{ required: true, message: '请输入首次请求延迟', trigger: 'blur' }],
+  windowDurationMs: [{ required: true, message: '请输入执行窗口时长', trigger: 'blur' }],
+  maxInFlight: [{ required: true, message: '请输入最大并发', trigger: 'blur' }],
+  requestTimeoutMs: [{ required: true, message: '请输入请求超时', trigger: 'blur' }],
 }
 
 async function loadConfig() {
@@ -53,10 +62,14 @@ async function loadConfig() {
     form.silkId = config.silkId ?? account?.silkId ?? null
     form.xVayne = config.xVayne ?? account?.xVayne ?? null
     form.enabled = Boolean(config.enabled)
-    form.cron = config.cron || '55 29 9 * * ?'
-    form.maxAttempts = 5
-    form.minIntervalMs = 100
-    form.maxIntervalMs = 300
+    form.cron = config.cron || '56 29 9 * * ?'
+    form.maxAttempts = config.maxAttempts ?? 100
+    form.minIntervalMs = config.minIntervalMs ?? 1
+    form.maxIntervalMs = config.maxIntervalMs ?? 10
+    form.startDelayMs = config.startDelayMs ?? 3000
+    form.windowDurationMs = config.windowDurationMs ?? 2000
+    form.maxInFlight = config.maxInFlight ?? 5
+    form.requestTimeoutMs = config.requestTimeoutMs ?? 1000
     xSivirMasked.value = config.xSivirMasked || ''
   } finally {
     loading.value = false
@@ -111,9 +124,13 @@ async function saveConfig() {
   } catch {
     return
   }
+  if (form.minIntervalMs > form.maxIntervalMs) {
+    ElMessage.error('最小请求间隔不能大于最大请求间隔')
+    return
+  }
   saving.value = true
   try {
-    const payload: any = { ...form, maxAttempts: 5, minIntervalMs: 100, maxIntervalMs: 300 }
+    const payload: any = { ...form }
     if (!payload.xSivir.trim()) {
       delete (payload as Partial<typeof payload>).xSivir
     }
@@ -202,7 +219,7 @@ onMounted(async () => {
         <div class="panel-header">
           <div>
             <h2>领取配置</h2>
-            <p>09:29:57.000 至 09:30:01.000 连续请求；凭证同时供监控自动抢单使用</p>
+            <p>按当前账号配置在准备 cron 后连续请求；凭证同时供监控自动抢单使用</p>
           </div>
           <el-switch v-model="form.enabled" inline-prompt active-text="开" inactive-text="关" />
         </div>
@@ -236,28 +253,39 @@ onMounted(async () => {
           <div class="time-row">
             <div class="time-cell">
               <span>首次请求时间</span>
-              <strong><el-icon><Clock /></el-icon> 预备 cron + 2 秒</strong>
+              <strong><el-icon><Clock /></el-icon> 准备 cron + {{ form.startDelayMs }}ms</strong>
             </div>
             <div class="time-cell">
               <span>连续窗口</span>
-              <strong>09:29:57-09:30:01</strong>
+              <strong>{{ form.windowDurationMs }}ms</strong>
             </div>
           </div>
           <el-form-item label="准备 cron（含秒）">
-            <el-input v-model="form.cron" placeholder="55 29 9 * * ?" />
-            <p class="field-note">默认 09:29:55 预备，09:29:57.000 发出第 1 次请求，持续到 09:30:01.000。</p>
+            <el-input v-model="form.cron" placeholder="56 29 9 * * ?" />
+            <p class="field-note">cron 到点后等待“首次请求延迟”，再按窗口、间隔和并发配置发送请求。</p>
           </el-form-item>
 
           <div class="number-grid">
-            <el-form-item label="窗口安全上限">
-              <el-input model-value="100 次" disabled class="full-width" />
-              <p class="field-note">连续窗口内由结束时间控制；成功、已抢完、已领取、登录失效或需验证会立即停止。</p>
+            <el-form-item label="最大请求次数" prop="maxAttempts">
+              <el-input-number v-model="form.maxAttempts" :min="1" :max="10000" :controls="false" class="full-width" />
             </el-form-item>
             <el-form-item label="最小间隔 (ms)" prop="minIntervalMs">
-              <el-input-number v-model="form.minIntervalMs" :min="100" :max="100" :controls="false" disabled class="full-width" />
+              <el-input-number v-model="form.minIntervalMs" :min="1" :max="60000" :controls="false" class="full-width" />
             </el-form-item>
             <el-form-item label="最大间隔 (ms)" prop="maxIntervalMs">
-              <el-input-number v-model="form.maxIntervalMs" :min="300" :max="300" :controls="false" disabled class="full-width" />
+              <el-input-number v-model="form.maxIntervalMs" :min="1" :max="60000" :controls="false" class="full-width" />
+            </el-form-item>
+            <el-form-item label="首次请求延迟 (ms)" prop="startDelayMs">
+              <el-input-number v-model="form.startDelayMs" :min="0" :max="60000" :controls="false" class="full-width" />
+            </el-form-item>
+            <el-form-item label="执行窗口 (ms)" prop="windowDurationMs">
+              <el-input-number v-model="form.windowDurationMs" :min="100" :max="60000" :controls="false" class="full-width" />
+            </el-form-item>
+            <el-form-item label="最大并发" prop="maxInFlight">
+              <el-input-number v-model="form.maxInFlight" :min="1" :max="5" :controls="false" class="full-width" />
+            </el-form-item>
+            <el-form-item label="单次请求超时 (ms)" prop="requestTimeoutMs">
+              <el-input-number v-model="form.requestTimeoutMs" :min="100" :max="60000" :controls="false" class="full-width" />
             </el-form-item>
           </div>
         </el-form>
@@ -272,9 +300,12 @@ onMounted(async () => {
         <div class="result-icon"><el-icon><Warning /></el-icon></div>
         <h2>执行规则</h2>
         <dl>
-          <div><dt>连续窗口</dt><dd>09:29:57-09:30:01</dd></div>
-          <div><dt>安全上限</dt><dd>100 次</dd></div>
+          <div><dt>首次请求</dt><dd>cron + {{ form.startDelayMs }}ms</dd></div>
+          <div><dt>连续窗口</dt><dd>{{ form.windowDurationMs }}ms</dd></div>
+          <div><dt>请求上限</dt><dd>{{ form.maxAttempts }} 次</dd></div>
+          <div><dt>最大并发</dt><dd>{{ form.maxInFlight }}</dd></div>
           <div><dt>随机间隔</dt><dd>{{ form.minIntervalMs }}-{{ form.maxIntervalMs }}ms</dd></div>
+          <div><dt>请求超时</dt><dd>{{ form.requestTimeoutMs }}ms</dd></div>
           <div><dt>停止条件</dt><dd>窗口结束或明确终态</dd></div>
         </dl>
         <div v-if="lastResult" class="last-result">

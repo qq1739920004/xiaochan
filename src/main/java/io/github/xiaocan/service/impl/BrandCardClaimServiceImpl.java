@@ -53,12 +53,13 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private static final String TEST_DEFAULT_CRON = "27 29 9 * * ?";
     private static final String PREVIOUS_DEFAULT_CRON = "55 29 9 * * ?";
     private static final String DEFAULT_CRON = "56 29 9 * * ?";
-    private static final int DEFAULT_MAX_ATTEMPTS = 5;
+    private static final int DEFAULT_MAX_ATTEMPTS = 100;
     private static final int DEFAULT_MIN_INTERVAL_MS = 1;
     private static final int DEFAULT_MAX_INTERVAL_MS = 10;
-    private static final int CONTINUOUS_MAX_IN_FLIGHT = 5;
-    private static final Duration CONTINUOUS_WINDOW = Duration.ofSeconds(2);
-    private static final int CONTINUOUS_REQUEST_TIMEOUT_MS = 1000;
+    private static final int DEFAULT_START_DELAY_MS = 3000;
+    private static final int DEFAULT_WINDOW_DURATION_MS = 2000;
+    private static final int DEFAULT_MAX_IN_FLIGHT = 5;
+    private static final int DEFAULT_REQUEST_TIMEOUT_MS = 1000;
     private final Map<Integer, LocalDateTime> lastScheduledRuns = new ConcurrentHashMap<>();
 
     @Resource
@@ -100,7 +101,9 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
 
     @Override
     public void saveConfig(Integer accountId, BrandCardClaimConfigDTO dto) {
-        if (dto.getMinIntervalMs() > dto.getMaxIntervalMs()) {
+        int minIntervalMs = valueOrDefault(dto.getMinIntervalMs(), DEFAULT_MIN_INTERVAL_MS);
+        int maxIntervalMs = valueOrDefault(dto.getMaxIntervalMs(), DEFAULT_MAX_INTERVAL_MS);
+        if (minIntervalMs > maxIntervalMs) {
             throw new BusinessException("最小请求间隔不能大于最大请求间隔");
         }
         String cron = normalizeCron(dto.getCron());
@@ -141,9 +144,13 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         config.setXVayne(dto.getXVayne());
         config.setEnabled(dto.getEnabled());
         config.setCron(cron);
-        config.setMaxAttempts(DEFAULT_MAX_ATTEMPTS);
-        config.setMinIntervalMs(DEFAULT_MIN_INTERVAL_MS);
-        config.setMaxIntervalMs(DEFAULT_MAX_INTERVAL_MS);
+        config.setMaxAttempts(valueOrDefault(dto.getMaxAttempts(), DEFAULT_MAX_ATTEMPTS));
+        config.setMinIntervalMs(minIntervalMs);
+        config.setMaxIntervalMs(maxIntervalMs);
+        config.setStartDelayMs(valueOrDefault(dto.getStartDelayMs(), DEFAULT_START_DELAY_MS));
+        config.setWindowDurationMs(valueOrDefault(dto.getWindowDurationMs(), DEFAULT_WINDOW_DURATION_MS));
+        config.setMaxInFlight(valueOrDefault(dto.getMaxInFlight(), DEFAULT_MAX_IN_FLIGHT));
+        config.setRequestTimeoutMs(valueOrDefault(dto.getRequestTimeoutMs(), DEFAULT_REQUEST_TIMEOUT_MS));
         if (StringUtils.hasText(dto.getXSivir())) {
             config.setXSivir(dto.getXSivir().trim());
         }
@@ -166,7 +173,7 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         BrandCardClaimHistoryEntity history = createRunningHistory(config,
                 LocalDateTime.ofInstant(firstAttemptAt, APP_ZONE));
         BrandCardClaimAttemptResult attempt = XiaochanHttp.grabExtraBrandCard(
-                config.getSilkId(), config.getXSivir(), config.getXVayne());
+                config.getSilkId(), config.getXSivir(), config.getXVayne(), requestTimeoutMs(config));
         Instant responseAt = Instant.now();
         BrandCardClaimExecutionResult result = attempt.retryable()
                 ? new BrandCardClaimExecutionResult(1, false, attempt.code(), attempt.message(),
@@ -232,8 +239,8 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                     if (previous == null || !previous.equals(now)) {
                         Instant target = preparationTarget(config, now);
                         log.info("大牌券连续窗口已准备：配置={}, 账号={}, 预备时间={}, 开始时间={}, 结束时间={}, 最大并发={}, 最快间隔={}毫秒",
-                                config.getId(), config.getAccountId(), now, target, target.plus(CONTINUOUS_WINDOW),
-                                CONTINUOUS_MAX_IN_FLIGHT, DEFAULT_MIN_INTERVAL_MS);
+                                config.getId(), config.getAccountId(), now, target, target.plus(windowDuration(config)),
+                                maxInFlight(config), minIntervalMs(config));
                         taskScheduler.execute(() -> runAutomaticClaim(config, target));
                     }
                 });
@@ -249,14 +256,15 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private Instant preparationTarget(BrandCardClaimConfigEntity config, LocalDateTime preparationTime) {
         String cron = normalizeCron(config.getCron());
         LocalDateTime scheduled = CronExpression.parse(cron).next(preparationTime.minusSeconds(1));
-        return (scheduled == null ? preparationTime.plusSeconds(3) : scheduled.plusSeconds(3))
-                .atZone(APP_ZONE).toInstant();
+        long startDelayNanos = Duration.ofMillis(startDelayMs(config)).toNanos();
+        LocalDateTime requestStart = scheduled == null ? preparationTime : scheduled;
+        return requestStart.plusNanos(startDelayNanos).atZone(APP_ZONE).toInstant();
     }
 
     private void runAutomaticClaim(BrandCardClaimConfigEntity config, Instant target) {
         Instant preparedAt = Instant.now();
         log.info("大牌券连续窗口已启动：配置={}, 账号={}, 窗口开始={}, 结束时间={}, 等待={}毫秒",
-                config.getId(), config.getAccountId(), target, target.plus(CONTINUOUS_WINDOW),
+                config.getId(), config.getAccountId(), target, target.plus(windowDuration(config)),
                 Math.max(0, Duration.between(preparedAt, target).toMillis()));
         taskScheduler.execute(XiaochanHttp::warmBrandCardEndpoint);
         BrandCardClaimHistoryEntity history = createRunningHistory(config,
@@ -266,9 +274,9 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                     Instant requestStartedAt = Instant.now();
                     log.info("大牌券请求已发送：配置={}, 相对窗口开始偏差={}毫秒, 超时={}毫秒",
                             config.getId(), Duration.between(target, requestStartedAt).toMillis(),
-                            CONTINUOUS_REQUEST_TIMEOUT_MS);
+                            requestTimeoutMs(config));
                     BrandCardClaimAttemptResult response = XiaochanHttp.grabExtraBrandCard(silkId, xSivir,
-                            config.getXVayne(), CONTINUOUS_REQUEST_TIMEOUT_MS);
+                            config.getXVayne(), requestTimeoutMs(config));
                     log.info("大牌券响应已收到：配置={}, 耗时={}毫秒, 响应码={}, 原因={}, 可重试={}, 消息={}",
                             config.getId(), Duration.between(requestStartedAt, Instant.now()).toMillis(),
                             response.code(), response.stopReason(), response.retryable(), safeLogMessage(response.message()));
@@ -277,16 +285,16 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
                 Clock.system(APP_ZONE),
                 duration -> TimeUnit.NANOSECONDS.sleep(duration.toNanos()),
                 () -> Duration.ofMillis(ThreadLocalRandom.current().nextLong(
-                        DEFAULT_MIN_INTERVAL_MS, DEFAULT_MAX_INTERVAL_MS + 1L))
+                        minIntervalMs(config), maxIntervalMs(config) + 1L))
         );
         BrandCardClaimExecutionResult result = executor.executeConcurrentContinuous(
                 config.getSilkId(),
                 config.getXSivir(),
                 config.getXVayne(),
-                Duration.ofMillis(DEFAULT_MIN_INTERVAL_MS),
-                CONTINUOUS_MAX_IN_FLIGHT,
+                maxAttempts(config),
+                maxInFlight(config),
                 target,
-                target.plus(CONTINUOUS_WINDOW),
+                target.plus(windowDuration(config)),
                 event -> saveAttempt(history, config, event)
         );
         finishHistory(history, result);
@@ -325,6 +333,10 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
             vo.setMaxAttempts(DEFAULT_MAX_ATTEMPTS);
             vo.setMinIntervalMs(DEFAULT_MIN_INTERVAL_MS);
             vo.setMaxIntervalMs(DEFAULT_MAX_INTERVAL_MS);
+            vo.setStartDelayMs(DEFAULT_START_DELAY_MS);
+            vo.setWindowDurationMs(DEFAULT_WINDOW_DURATION_MS);
+            vo.setMaxInFlight(DEFAULT_MAX_IN_FLIGHT);
+            vo.setRequestTimeoutMs(DEFAULT_REQUEST_TIMEOUT_MS);
             return vo;
         }
         vo.setAccountId(config.getAccountId());
@@ -333,10 +345,50 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
         vo.setXSivirMasked(mask(config.getXSivir()));
         vo.setEnabled(config.getEnabled());
         vo.setCron(normalizeCron(config.getCron()));
-        vo.setMaxAttempts(DEFAULT_MAX_ATTEMPTS);
-        vo.setMinIntervalMs(DEFAULT_MIN_INTERVAL_MS);
-        vo.setMaxIntervalMs(DEFAULT_MAX_INTERVAL_MS);
+        vo.setMaxAttempts(maxAttempts(config));
+        vo.setMinIntervalMs(minIntervalMs(config));
+        vo.setMaxIntervalMs(maxIntervalMs(config));
+        vo.setStartDelayMs(startDelayMs(config));
+        vo.setWindowDurationMs(windowDurationMs(config));
+        vo.setMaxInFlight(maxInFlight(config));
+        vo.setRequestTimeoutMs(requestTimeoutMs(config));
         return vo;
+    }
+
+    private int maxAttempts(BrandCardClaimConfigEntity config) {
+        return valueOrDefault(config.getMaxAttempts(), DEFAULT_MAX_ATTEMPTS);
+    }
+
+    private int minIntervalMs(BrandCardClaimConfigEntity config) {
+        return valueOrDefault(config.getMinIntervalMs(), DEFAULT_MIN_INTERVAL_MS);
+    }
+
+    private int maxIntervalMs(BrandCardClaimConfigEntity config) {
+        return valueOrDefault(config.getMaxIntervalMs(), DEFAULT_MAX_INTERVAL_MS);
+    }
+
+    private int startDelayMs(BrandCardClaimConfigEntity config) {
+        return valueOrDefault(config.getStartDelayMs(), DEFAULT_START_DELAY_MS);
+    }
+
+    private int windowDurationMs(BrandCardClaimConfigEntity config) {
+        return valueOrDefault(config.getWindowDurationMs(), DEFAULT_WINDOW_DURATION_MS);
+    }
+
+    private int maxInFlight(BrandCardClaimConfigEntity config) {
+        return valueOrDefault(config.getMaxInFlight(), DEFAULT_MAX_IN_FLIGHT);
+    }
+
+    private int requestTimeoutMs(BrandCardClaimConfigEntity config) {
+        return valueOrDefault(config.getRequestTimeoutMs(), DEFAULT_REQUEST_TIMEOUT_MS);
+    }
+
+    private Duration windowDuration(BrandCardClaimConfigEntity config) {
+        return Duration.ofMillis(windowDurationMs(config));
+    }
+
+    private int valueOrDefault(Integer value, int defaultValue) {
+        return value == null ? defaultValue : value;
     }
 
     private String mask(String value) {

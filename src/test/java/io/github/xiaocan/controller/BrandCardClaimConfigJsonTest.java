@@ -30,6 +30,31 @@ class BrandCardClaimConfigJsonTest {
     }
 
     @Test
+    void 支持保存并回显大牌券执行参数() throws Exception {
+        BrandCardClaimConfigDTO dto = objectMapper.readValue("""
+                {"silkId":126938104,"xVayne":1836966,"enabled":true,
+                 "maxAttempts":280,"minIntervalMs":1,"maxIntervalMs":10,
+                 "startDelayMs":3000,"windowDurationMs":2000,
+                 "maxInFlight":5,"requestTimeoutMs":1000}
+                """, BrandCardClaimConfigDTO.class);
+        BrandCardClaimConfigVO vo = new BrandCardClaimConfigVO();
+        vo.setMaxAttempts(dto.getMaxAttempts());
+        vo.setMinIntervalMs(dto.getMinIntervalMs());
+        vo.setMaxIntervalMs(dto.getMaxIntervalMs());
+        vo.setStartDelayMs(dto.getStartDelayMs());
+        vo.setWindowDurationMs(dto.getWindowDurationMs());
+        vo.setMaxInFlight(dto.getMaxInFlight());
+        vo.setRequestTimeoutMs(dto.getRequestTimeoutMs());
+
+        String json = objectMapper.writeValueAsString(vo);
+
+        assertEquals(280, dto.getMaxAttempts());
+        assertEquals(3000, dto.getStartDelayMs());
+        assertTrue(json.contains("\"maxInFlight\":5"));
+        assertTrue(json.contains("\"requestTimeoutMs\":1000"));
+    }
+
+    @Test
     void accountResponseNeverContainsFullSessionCredential() throws Exception {
         XiaochanAccountVO vo = new XiaochanAccountVO();
         vo.setAccountName("主账号");

@@ -23,6 +23,10 @@ public class BrandCardClaimConfigEntity {
     private Integer maxAttempts;
     private Integer minIntervalMs;
     private Integer maxIntervalMs;
+    private Integer startDelayMs;
+    private Integer windowDurationMs;
+    private Integer maxInFlight;
+    private Integer requestTimeoutMs;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
     @TableLogic

@@ -147,8 +147,26 @@ public class BrandCardClaimExecutor {
                                                                        Duration interval, int maxInFlight,
                                                                        Instant target, Instant deadline,
                                                                        Consumer<BrandCardClaimAttemptEvent> attemptConsumer) {
+        return executeConcurrentContinuous(silkId, xSivir, xVayne, Integer.MAX_VALUE, maxInFlight,
+                () -> interval, target, deadline, attemptConsumer);
+    }
+
+    public BrandCardClaimExecutionResult executeConcurrentContinuous(Long silkId, String xSivir, Long xVayne,
+                                                                       int maxAttempts, int maxInFlight,
+                                                                       Instant target, Instant deadline,
+                                                                       Consumer<BrandCardClaimAttemptEvent> attemptConsumer) {
+        return executeConcurrentContinuous(silkId, xSivir, xVayne, maxAttempts, maxInFlight,
+                intervalSupplier, target, deadline, attemptConsumer);
+    }
+
+    private BrandCardClaimExecutionResult executeConcurrentContinuous(Long silkId, String xSivir, Long xVayne,
+                                                                        int maxAttempts, int maxInFlight,
+                                                                        Supplier<Duration> requestIntervalSupplier,
+                                                                        Instant target, Instant deadline,
+                                                                        Consumer<BrandCardClaimAttemptEvent> attemptConsumer) {
         waitUntil(target);
         int concurrency = Math.max(1, maxInFlight);
+        int attemptLimit = Math.max(1, maxAttempts);
         ExecutorService workers = Executors.newFixedThreadPool(concurrency);
         CompletionService<BrandCardClaimAttemptEvent> completions = new ExecutorCompletionService<>(workers);
         BrandCardClaimAttemptResult lastAttempt = null;
@@ -181,6 +199,11 @@ public class BrandCardClaimExecutor {
                 }
 
                 Instant now = clock.instant();
+                if (attempts >= attemptLimit) {
+                    stopSubmitting = true;
+                    continue;
+                }
+
                 if (now.isBefore(deadline) && inFlight < concurrency && !now.isBefore(nextRequestAt)) {
                     int sequence = ++attempts;
                     if (firstAttemptAt == null) {
@@ -188,7 +211,7 @@ public class BrandCardClaimExecutor {
                     }
                     completions.submit(() -> executeAttempt(sequence, silkId, xSivir, xVayne));
                     inFlight++;
-                    nextRequestAt = now.plus(interval);
+                    nextRequestAt = now.plus(validInterval(requestIntervalSupplier.get()));
                     continue;
                 }
 
@@ -233,6 +256,11 @@ public class BrandCardClaimExecutor {
             result = BrandCardClaimAttemptResult.retryable(null, "请求异常: " + e.getMessage());
         }
         return new BrandCardClaimAttemptEvent(sequence, requestTime, clock.instant(), result);
+    }
+
+    private Duration validInterval(Duration interval) {
+        return interval == null || interval.isNegative() || interval.isZero()
+                ? Duration.ofMillis(1) : interval;
     }
 
     private boolean isContinuousWindowTerminal(BrandCardClaimAttemptResult attempt) {
