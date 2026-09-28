@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.xiaocan.model.dto.BrandCardClaimConfigDTO;
 import io.github.xiaocan.model.vo.BrandCardClaimConfigVO;
 import io.github.xiaocan.model.vo.XiaochanAccountVO;
+import jakarta.validation.Validation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -52,6 +53,19 @@ class BrandCardClaimConfigJsonTest {
         assertEquals(3000, dto.getStartDelayMs());
         assertTrue(json.contains("\"maxInFlight\":5"));
         assertTrue(json.contains("\"requestTimeoutMs\":1000"));
+    }
+
+    @Test
+    void 最大并发支持超过五的配置() {
+        BrandCardClaimConfigDTO dto = new BrandCardClaimConfigDTO();
+        dto.setSilkId(126938104L);
+        dto.setXVayne(1836966L);
+        dto.setEnabled(true);
+        dto.setMaxInFlight(20);
+
+        var validator = Validation.buildDefaultValidatorFactory().getValidator();
+
+        assertTrue(validator.validate(dto).isEmpty());
     }
 
     @Test

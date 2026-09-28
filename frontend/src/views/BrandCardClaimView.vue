@@ -282,7 +282,7 @@ onMounted(async () => {
               <el-input-number v-model="form.windowDurationMs" :min="100" :max="60000" :controls="false" class="full-width" />
             </el-form-item>
             <el-form-item label="最大并发" prop="maxInFlight">
-              <el-input-number v-model="form.maxInFlight" :min="1" :max="5" :controls="false" class="full-width" />
+              <el-input-number v-model="form.maxInFlight" :min="1" :controls="false" class="full-width" />
             </el-form-item>
             <el-form-item label="单次请求超时 (ms)" prop="requestTimeoutMs">
               <el-input-number v-model="form.requestTimeoutMs" :min="100" :max="60000" :controls="false" class="full-width" />

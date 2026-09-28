@@ -36,7 +36,6 @@ public class BrandCardClaimConfigDTO {
     @Max(value = 60000, message = "执行窗口不能超过 60000ms")
     private Integer windowDurationMs = 2000;
     @Min(value = 1, message = "最大并发至少为 1")
-    @Max(value = 5, message = "最大并发不能超过 5")
     private Integer maxInFlight = 5;
     @Min(value = 100, message = "请求超时不能低于 100ms")
     @Max(value = 60000, message = "请求超时不能超过 60000ms")
