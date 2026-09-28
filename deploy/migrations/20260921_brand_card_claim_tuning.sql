@@ -56,9 +56,9 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 UPDATE `brand_card_claim_config`
-SET `max_attempts` = CASE WHEN `max_attempts` IS NULL OR `max_attempts` = 5 THEN 100 ELSE `max_attempts` END,
+SET `max_attempts` = COALESCE(`max_attempts`, 5),
     `min_interval_ms` = COALESCE(`min_interval_ms`, 100),
-    `max_interval_ms` = COALESCE(`max_interval_ms`, 300),
+    `max_interval_ms` = COALESCE(`max_interval_ms`, 400),
     `start_delay_ms` = COALESCE(`start_delay_ms`, 3000),
     `window_duration_ms` = COALESCE(`window_duration_ms`, 2000),
     `max_in_flight` = COALESCE(`max_in_flight`, 5),

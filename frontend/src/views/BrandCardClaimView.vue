@@ -30,9 +30,9 @@ const form = reactive({
   xSivir: '',
   enabled: false,
   cron: '56 29 9 * * ?',
-  maxAttempts: 100,
+  maxAttempts: 5,
   minIntervalMs: 100,
-  maxIntervalMs: 300,
+  maxIntervalMs: 400,
   startDelayMs: 3000,
   windowDurationMs: 2000,
   maxInFlight: 5,
@@ -63,9 +63,9 @@ async function loadConfig() {
     form.xVayne = config.xVayne ?? account?.xVayne ?? null
     form.enabled = Boolean(config.enabled)
     form.cron = config.cron || '56 29 9 * * ?'
-    form.maxAttempts = config.maxAttempts ?? 100
+    form.maxAttempts = config.maxAttempts ?? 5
     form.minIntervalMs = config.minIntervalMs ?? 100
-    form.maxIntervalMs = config.maxIntervalMs ?? 300
+    form.maxIntervalMs = config.maxIntervalMs ?? 400
     form.startDelayMs = config.startDelayMs ?? 3000
     form.windowDurationMs = config.windowDurationMs ?? 2000
     form.maxInFlight = config.maxInFlight ?? 5

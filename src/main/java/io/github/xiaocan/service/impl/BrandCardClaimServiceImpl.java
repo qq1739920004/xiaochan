@@ -53,9 +53,9 @@ public class BrandCardClaimServiceImpl extends ServiceImpl<BrandCardClaimConfigM
     private static final String TEST_DEFAULT_CRON = "27 29 9 * * ?";
     private static final String PREVIOUS_DEFAULT_CRON = "55 29 9 * * ?";
     private static final String DEFAULT_CRON = "56 29 9 * * ?";
-    private static final int DEFAULT_MAX_ATTEMPTS = 100;
+    private static final int DEFAULT_MAX_ATTEMPTS = 5;
     private static final int DEFAULT_MIN_INTERVAL_MS = 100;
-    private static final int DEFAULT_MAX_INTERVAL_MS = 300;
+    private static final int DEFAULT_MAX_INTERVAL_MS = 400;
     private static final int DEFAULT_START_DELAY_MS = 3000;
     private static final int DEFAULT_WINDOW_DURATION_MS = 2000;
     private static final int DEFAULT_MAX_IN_FLIGHT = 5;

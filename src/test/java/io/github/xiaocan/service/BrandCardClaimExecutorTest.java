@@ -27,9 +27,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BrandCardClaimExecutorTest {
 
     @Test
-    void defaultConcurrentClaimIntervalUsesOneHundredToThreeHundredMilliseconds() throws Exception {
+    void defaultClaimSettingsMatchPreviouslySuccessfulConfiguration() throws Exception {
+        assertEquals(5, privateIntConstant("DEFAULT_MAX_ATTEMPTS"));
         assertEquals(100, privateIntConstant("DEFAULT_MIN_INTERVAL_MS"));
-        assertEquals(300, privateIntConstant("DEFAULT_MAX_INTERVAL_MS"));
+        assertEquals(400, privateIntConstant("DEFAULT_MAX_INTERVAL_MS"));
+        assertEquals(3000, privateIntConstant("DEFAULT_START_DELAY_MS"));
+        assertEquals(2000, privateIntConstant("DEFAULT_WINDOW_DURATION_MS"));
+        assertEquals(5, privateIntConstant("DEFAULT_MAX_IN_FLIGHT"));
+        assertEquals(1000, privateIntConstant("DEFAULT_REQUEST_TIMEOUT_MS"));
     }
 
     @Test

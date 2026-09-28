@@ -22,13 +22,13 @@ public class BrandCardClaimConfigDTO {
     private Boolean enabled;
     @Min(value = 1, message = "最大请求次数至少为 1")
     @Max(value = 10000, message = "最大请求次数不能超过 10000")
-    private Integer maxAttempts = 100;
+    private Integer maxAttempts = 5;
     @Min(value = 1, message = "最小请求间隔不能低于 1ms")
     @Max(value = 60000, message = "最小请求间隔不能超过 60000ms")
     private Integer minIntervalMs = 100;
     @Min(value = 1, message = "最大请求间隔不能低于 1ms")
     @Max(value = 60000, message = "最大请求间隔不能超过 60000ms")
-    private Integer maxIntervalMs = 300;
+    private Integer maxIntervalMs = 400;
     @Min(value = 0, message = "首次请求延迟不能小于 0ms")
     @Max(value = 60000, message = "首次请求延迟不能超过 60000ms")
     private Integer startDelayMs = 3000;
