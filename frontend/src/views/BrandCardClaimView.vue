@@ -31,8 +31,8 @@ const form = reactive({
   enabled: false,
   cron: '56 29 9 * * ?',
   maxAttempts: 100,
-  minIntervalMs: 1,
-  maxIntervalMs: 10,
+  minIntervalMs: 100,
+  maxIntervalMs: 300,
   startDelayMs: 3000,
   windowDurationMs: 2000,
   maxInFlight: 5,
@@ -64,8 +64,8 @@ async function loadConfig() {
     form.enabled = Boolean(config.enabled)
     form.cron = config.cron || '56 29 9 * * ?'
     form.maxAttempts = config.maxAttempts ?? 100
-    form.minIntervalMs = config.minIntervalMs ?? 1
-    form.maxIntervalMs = config.maxIntervalMs ?? 10
+    form.minIntervalMs = config.minIntervalMs ?? 100
+    form.maxIntervalMs = config.maxIntervalMs ?? 300
     form.startDelayMs = config.startDelayMs ?? 3000
     form.windowDurationMs = config.windowDurationMs ?? 2000
     form.maxInFlight = config.maxInFlight ?? 5
